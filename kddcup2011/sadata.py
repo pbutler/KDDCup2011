@@ -15,8 +15,9 @@ from sqlalchemy.orm import sessionmaker, relation, backref,create_session
 from sqlalchemy.ext.declarative import declarative_base
 import datetime
 
-engine = create_engine('postgresql:///kddcuptest')
+#engine = create_engine('postgresql:///kddcuptest')
 #engine = create_engine('sqlite:///:memory:')
+engine = create_engine('sqlite:///kddcup2011/kddcup2011.sqlite')
 Session = sessionmaker(autocommit = False, autoflush = True)
 Session.configure(bind=engine)
 metadata = MetaData()
@@ -35,13 +36,18 @@ class SQLData:
     def delete(self):
         return session.delete(self)
 
-album_genre = Table('association', Base.metadata,
-    Column('album_id', Integer, ForeignKey('albums.album_id')),
-    Column('genre_id', Integer, ForeignKey('genres.genre_id'))
+album_genre = Table('data_album_genres', Base.metadata,
+    Column('album_id', Integer, ForeignKey('data_album.album_id')),
+    Column('genre_id', Integer, ForeignKey('data_genre.genre_id'))
+)
+
+track_genre = Table('data_track_genres', Base.metadata,
+    Column('track_id', Integer, ForeignKey('data_track.track_id')),
+    Column('genre_id', Integer, ForeignKey('data_genre.genre_id'))
 )
 
 class User(Base,SQLData):
-    __tablename__ = 'users'
+    __tablename__ = 'data_user'
     user_id = Column(Integer, primary_key=True)
 
     def __init__(self, user_id): #title=None, num_words=None, time=None, hash=None):
@@ -51,12 +57,12 @@ class User(Base,SQLData):
         return "<User: %d>" % self.user_id
 
 class Rating(Base, SQLData):
-    __tablename__ = 'ratings'
+    __tablename__ = 'data_ratings'
     rating_id  = Column(Integer, primary_key=True, autoincrement=True)
     item_id  = Column(Integer) #, primary_key=True)
     timestamp          = Column(DateTime)
     score = Column(Integer)
-    user_id   = Column(Integer, ForeignKey('users.user_id'))
+    user_id   = Column(Integer, ForeignKey('data_user.user_id'))
     user = relation(User, backref=backref('ratings'))
 
     def __init__(self, item_id = None, timestamp = None, score= None, user=None):
@@ -72,22 +78,22 @@ class Rating(Base, SQLData):
 
 
 class Genre(Base, SQLData):
-    __tablename__ = 'genres'
+    __tablename__ = 'data_genre'
     genre_id = Column(Integer, primary_key=True)
     def __init__(self, genre_id = None):
         self.genre_id = genre_id
 
 class Artist(Base, SQLData):
-    __tablename__ = 'artists'
+    __tablename__ = 'data_artist'
     artist_id = Column(Integer, primary_key=True)
 
     def __init__(self, artist_id = None):
        self.artist_id = artist_id
 
 class Album(Base, SQLData):
-    __tablename__ = 'albums'
+    __tablename__ = 'data_album'
     album_id = Column(Integer, primary_key=True)
-    artist_id   = Column(Integer, ForeignKey('artists.artist_id'))
+    artist_id   = Column(Integer, ForeignKey('data_artist.artist_id'))
     artist = relation(Artist, backref=backref('albums'))
     genres = relation("Genre", secondary=album_genre, backref="albums")
 
@@ -102,65 +108,25 @@ class Album(Base, SQLData):
         return "<Album(%s): by %s in %d genres>" % ( self.album_id,
                 self.artist_id, len(self.genres))
 
-def readDatas(dir):
-    start = time.time()
+class Track(Base, SQLData):
+    __tablename__ = 'data_track'
+    track_id = Column(Integer, primary_key=True)
+    artist_id   = Column(Integer, ForeignKey('data_artist.artist_id'))
+    artist = relation(Artist, backref=backref('tracks'))
+    album_id   = Column(Integer, ForeignKey('data_album.album_id'))
+    album = relation(Album, backref=backref('albums'))
+    genres = relation("Genre", secondary=track_genre, backref="tracks")
 
-    artistdata = open(os.path.join(dir, "artistData1.txt" ))
-    for line in artistdata:
-        id = int( line.strip())
-        artist = Artist(id)
-        artist.add()
-    artistdata.close()
-
-    print "."
-
-    genredata = open(os.path.join(dir, "genreData1.txt" ))
-    for line in  genredata:
-        id = int( line.strip())
-        genre = Genre(id)
-        genre.add()
-    genredata.close()
-    session.commit()
-
-    print "."
-    albumdata = open(os.path.join(dir, "albumData1.txt" ))
-    for line in albumdata:
-        row = line.strip().split("|")
-        id = int(row[0])
-        if row[1] == "None":
-            artistid = None
+    def __init__(self, album_id = None, artist = None):
+        self.album_id = album_id
+        if isinstance(artist, int):
+            self.artist_id = artist
         else:
-            artistid = int(row[1])
-        album = Album(id, artistid)
-        session.flush()
-        if len(row) >= 3 and row[2] != "None":
-            genres = map(int, row[2:])
-            album.genres = Genre.select().filter(Genre.genre_id.in_(genres)).all()
-        session.commit()
-    albumdata.close()
+            self.artist = artist
 
-    return
-    print "."
-    data = open(os.path.join(dir, "trackData1.txt"))
-    for line in data:
-        userid, nratings = line.strip().split("|")
-        u = User(userid)
-        u.add()
-        print userid
-        for i in range(int(nratings)):
-            line = data.next()
-            item, score, day, timestamp = line.strip().split("\t")
-            hour, minu, sec = timestamp.split(":")
-            dt = datetime.datetime.min + datetime.timedelta(int(day))
-            dt = dt.replace(hour = int(hour), minute = int(minu), second = int(sec))
-            r = Rating(int(item), dt, int(score), u)
-            r.add()
-            print item, score, dt
-        session.flush()
-    transaction.commit()
-    stop = time.time()
-    print "Data read in %d seconds" % (stop -start)
-
+    def __repr__(self):
+        return "<Track(%s): by %s in %d genres>" % ( self.album_id,
+                self.artist_id, len(self.genres))
 def main(args):
     import  optparse
     parser = optparse.OptionParser()
