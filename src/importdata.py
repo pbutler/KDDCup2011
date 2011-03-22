@@ -10,7 +10,8 @@ __email__  = [ 'pabutler@vt.edu', "patnaik@vt.edu" ]
 
 import time
 import os
-from kddcup2011 import *
+from kddcup2011.data.models import *
+import datetime
 from django.db import connection, transaction
 from django.db.models.fields.related import ManyToManyField
 

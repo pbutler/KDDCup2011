@@ -12,4 +12,9 @@ def reset_db():
     local("./kddcup2011/manage.py reset data", capture=False)
     local("./kddcup2011/manage.py syncdb", capture=False)
 
-
+def select_psqltest():
+    local("echo psqltest > kddcup2011/.dbrc")
+def select_psql2011():
+    local("echo psql2011 > kddcup2011/.dbrc")
+def select_sqlite():
+    local("echo sqlite > kddcup2011/.dbrc")

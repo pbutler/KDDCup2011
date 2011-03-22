@@ -15,9 +15,10 @@ from sqlalchemy.orm import sessionmaker, relation, backref,create_session
 from sqlalchemy.ext.declarative import declarative_base
 import datetime
 
-#engine = create_engine('postgresql:///kddcuptest')
-#engine = create_engine('sqlite:///:memory:')
-engine = create_engine('sqlite:///kddcup2011/kddcup2011.sqlite')
+import local
+
+engine = create_engine(local.sadb)
+#conn = engine.connect()
 Session = sessionmaker(autocommit = False, autoflush = True)
 Session.configure(bind=engine)
 metadata = MetaData()
@@ -138,11 +139,7 @@ def main(args):
 
     if len(args) < 1:
         parser.error("Not enough arguments given")
-
-
     metadata.create_all(engine)
-    readDatas(args[0])
-    print len(list(User.select())), len(list(Rating.select()))
     return 0
 
 if __name__ == "__main__":
