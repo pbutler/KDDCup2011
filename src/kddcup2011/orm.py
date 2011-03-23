@@ -59,7 +59,7 @@ class User(Base,SQLData):
         return "<User: %d>" % self.user_id
 
 class Rating(Base, SQLData):
-    __tablename__ = 'data_ratings'
+    __tablename__ = 'data_rating'
     rating_id  = Column(Integer, primary_key=True, autoincrement=True)
     item_id  = Column(Integer) #, primary_key=True)
     timestamp          = Column(DateTime)

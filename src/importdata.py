@@ -31,8 +31,10 @@ class Importer(object):
             self.execute()
 
     def execute(self):
+        if not self.objs:
+            return
         if self.parent:
-            self.parent.execute() #finish(notchildren = True)
+                self.parent.execute() #finish(notchildren = True)
         sys.stdout.write("o")
         sys.stdout.flush()
         self.conn.execute( self.table.insert(), self.objs)
@@ -48,14 +50,14 @@ class Importer(object):
 
 def readDatas(dir):
     start = time.time()
-    #tRating.drop(checkfirst=True)
-    #album_genre.drop(checkfirst=True)
-    #album_track.drop(checkfirst=True)
-    #tTrack.drop(checkfirst=True)
-    #tAlbum.drop(checkfirst=True)
-    #tArtist.drop(checkfirst=True)
-    #tGenre.drop(checkfirst=True)
-    #tUser.drop(checkfirst=True)
+    tRating.drop(checkfirst=True)
+    orm.album_genre.drop(checkfirst=True)
+    orm.track_genre.drop(checkfirst=True)
+    tTrack.drop(checkfirst=True)
+    tAlbum.drop(checkfirst=True)
+    tArtist.drop(checkfirst=True)
+    tGenre.drop(checkfirst=True)
+    tUser.drop(checkfirst=True)
     orm.metadata.drop_all(engine)
     orm.metadata.create_all(engine)
     conn = engine.connect()
@@ -164,7 +166,7 @@ def readDatas(dir):
     i.finish()
     del iu
     print "."
-    stop = time.time(
+    stop = time.time()
     try:
         trans.commit()
     except Exception, e:
