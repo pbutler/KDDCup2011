@@ -8,87 +8,82 @@ Python source code - replace this with a description of the code and write the c
 __author__ = [ 'Patrick Butler', "Depbrakash Patnaik" ]
 __email__  = [ 'pabutler@vt.edu', "patnaik@vt.edu" ]
 
+import sys
 import time
 import os
-from kddcup2011.data.models import *
+from kddcup2011 import *
+#from kddcup2011.data.models import *
 import datetime
 from django.db import connection, transaction
 from django.db.models.fields.related import ManyToManyField
 
 class Importer(object):
-    def __init__(self, model, max = 10000):
-        if isinstance(model, ManyToManyField):
-            self.tablename = model.m2m_db_table()
-            self.fnames = (model.m2m_column_name(), model.m2m_reverse_name())
-            self.m2m = True
-        else:
-            self.m2m = False
-            self.tablename = model._meta.db_table
-            self.fields = model._meta.fields
-            self.fnames = [ f.column for f in self.fields ]
-            self.many = {}
-            for m2m in model._meta.many_to_many:
-                self.many[m2m.name] = Importer(m2m, max)
-
+    def __init__(self, conn, table, max = 100000, parent = None):
+        self.conn = conn
+        self.table = table
         self.max = max
+        self.parent = parent
         self.objs = []
 
-
     def add(self, obj):
-        if isinstance(obj, list) or isinstance(obj, tuple):
-            self.objs += [ list(obj) ]
-        else:
-            self.objs += [[  getattr(obj, f) for f in self.fnames ]]
+        self.objs += [ obj ]
         if len(self.objs) >= self.max:
             self.execute()
 
     def execute(self):
-        c = connection.cursor()
-        sql = "INSERT INTO %s "  % ( self.tablename)
-        sql += "(" + ",".join([ f for f in self.fnames ]) + ")"
-        sql += " VALUES "
-        sql += "(" + ",".join([ '%s' for f in self.fnames ]) + ")"
-        c.executemany(sql, self.objs)
-        transaction.commit_unless_managed()
+        if self.parent:
+            self.parent.execute() #finish(notchildren = True)
+        sys.stdout.write("o")
+        sys.stdout.flush()
+        self.conn.execute( self.table.insert(), self.objs)
+        #       self.table.insert().execute(self.objs)
         self.objs = []
 
-    def finish(self):
+    def finish(self, notchildren = False):
         if len(self.objs) > 0:
             self.execute()
-        if not self.m2m:
-            for i in self.many.values():
-                i.finish()
 
     def __del__(self):
         self.finish()
 
 def readDatas(dir):
-
     start = time.time()
-
+    #tRating.drop(checkfirst=True)
+    #album_genre.drop(checkfirst=True)
+    #album_track.drop(checkfirst=True)
+    #tTrack.drop(checkfirst=True)
+    #tAlbum.drop(checkfirst=True)
+    #tArtist.drop(checkfirst=True)
+    #tGenre.drop(checkfirst=True)
+    #tUser.drop(checkfirst=True)
+    orm.metadata.drop_all(engine)
+    orm.metadata.create_all(engine)
+    conn = engine.connect()
+    trans = conn.begin()
     print "Artist",
     artistdata = open(os.path.join(dir, "artistData1.txt" ))
-    i = Importer(Artist)
+    i = Importer(conn, tArtist)
     for line in artistdata:
         id = int(line.strip())
-        i.add( Artist(id) )
+        i.add( {'artist_id': id } )
     i.finish()
     artistdata.close()
     print "."
 
     print "Genre",
     genredata = open(os.path.join(dir, "genreData1.txt" ))
-    i = Importer(Genre)
+    i = Importer(conn, tGenre)
     for line in  genredata:
         id = int( line.strip())
-        i.add( Genre(id) )
+        i.add( { 'genre_id': id } )
     i.finish()
     genredata.close()
 
     print "."
     print "Album",
     albumdata = open(os.path.join(dir, "albumData1.txt" ))
-    i = Importer(Album)
+    i = Importer(conn, tAlbum)
+    iag = Importer(conn, orm.album_genre, parent=i)
     for line in albumdata:
         row = line.strip().split("|")
         id = int(row[0])
@@ -96,19 +91,21 @@ def readDatas(dir):
             artistid = None
         else:
             artistid = int(row[1])
-        album = Album(id, artistid)
-        if len(row) >= 3 and row[2] != "None":
-            genres = map(int, row[2:])
-            for g in genres:
-                i.many['genres'].add ( (id, g) )
+        i.add( { 'album_id' : id, 'artist_id' : artistid} )
+        for g in row[2:]:
+            g = int(g)
+            iag.add( { 'artist_id' : id, 'genre_id' : g})
     i.finish()
+    iag.finish()
+    del iag
     albumdata.close()
 
     print "."
 
     print "Track",
     data = open(os.path.join(dir, "trackData1.txt"))
-    i = Importer( Track )
+    i = Importer(conn, tTrack )
+    iat = Importer(conn, orm.track_genre, parent=i)
     for line in data:
         row = line.strip().split("|")
         track_id = int(row[0])
@@ -121,12 +118,14 @@ def readDatas(dir):
             artist_id = None
         else:
             artist_id = int(row[2])
-        i.add(Track(track_id, artist_id, album_id) )
+        i.add({'track_id' : track_id, 'artist_id' : artist_id, 'album_id' : album_id} )
 
         for g in row[3:]:
             g = int(g)
-            i.many['genres'].add ( (track_id, g) )
+            iat.add ( {'track_id' :track_id, 'genre_id' : g} )
     i.finish()
+    iat.finish()
+    del iat
     data.close()
 
     print "."
@@ -136,18 +135,17 @@ def readDatas(dir):
         ]
     print "Ratings",
     users = {}
-    i = Importer( Rating )
-    iu = Importer( User, 1 )
+    iu = Importer(conn, tUser)
+    i = Importer(conn, tRating, parent=iu)
     rid = 0
     for file, type in filesandmodels:
         print file,
         data = open(os.path.join(dir, file))
         for line in data:
             user, nratings = [ int(c) for c in line.strip().split("|") ]
-            u = User(user)
             if user not in users:
                 users[user] = 1
-                iu.add(u)
+                iu.add({ 'user_id' : user} )
             for n in range(int(nratings)):
                 line = data.next()
                 if type != 3:
@@ -160,12 +158,18 @@ def readDatas(dir):
                 dt = datetime.datetime.min + datetime.timedelta(int(day))
                 dt = dt.replace(hour = int(hour), minute = int(minu), second = int(sec))
                 rid += 1
-                i.add(Rating(rid, int(item), dt, score, type, user, pk=None))
-        i.finish()
-
+                i.add( {'item_id' : int(item), 'timestamp': dt, 'score': score,
+                    'type': type, 'user_id' : user})
     iu.finish()
+    i.finish()
+    del iu
     print "."
-    stop = time.time()
+    stop = time.time(
+    try:
+        trans.commit()
+    except Exception, e:
+        print e
+    conn.close()
     print "Data read in %d seconds" % (stop -start)
 
 def main(args):

@@ -15,13 +15,14 @@ from sqlalchemy.orm import sessionmaker, relation, backref,create_session
 from sqlalchemy.ext.declarative import declarative_base
 import datetime
 
-import local
+import localsettings
 
-engine = create_engine(local.sadb)
+engine = create_engine(localsettings.sadb)
 #conn = engine.connect()
 Session = sessionmaker(autocommit = False, autoflush = True)
 Session.configure(bind=engine)
 metadata = MetaData()
+metadata.bind = engine
 session = Session()
 
 Base = declarative_base(engine, metadata)

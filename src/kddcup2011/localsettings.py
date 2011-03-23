@@ -26,13 +26,13 @@ DBS = {
             "name"   : os.path.join(mydir, "kddcup2011.sqlite"),
             "uri"    : "sqlite:///"+os.path.join(mydir, "kddcup2011.sqlite")},
         "psqltest" :
-          { "engine" : 'django.db.backendspostgresql_psycopg2',
+          { "engine" : 'django.db.backends.postgresql_psycopg2',
             "name"   : "kddcuptest",
-            "uri"    : "posgresql://kddcuptest"},
+            "uri"    : "postgresql://localhost/kddcuptest"},
         "psql2011" :
-          { "engine" : 'django.db.backendspostgresql_psycopg2',
+          { "engine" : 'django.db.backends.postgresql_psycopg2',
             "name"   : "kddcup2011",
-            "uri"    : "posgresql://kddcup2011"},
+            "uri"    : "postgresql://localhost/kddcup2011"},
       }
 
 DATABASES = {
