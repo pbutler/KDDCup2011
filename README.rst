@@ -1,9 +1,9 @@
 Required Packages
 =================
-Django==1.2
-Fabric==1.0.1
-SQLAlchemy==0.6.6
-psycopg2==2.4
+ * Django==1.2
+ * Fabric==1.0.1
+ * SQLAlchemy==0.6.6
+ * psycopg2==2.4
 
 Usage
 =====
@@ -30,12 +30,12 @@ The API can be accesed via:
 
 Tables
 ------
- * tAlbum
- * tArtist
- * tGenre
- * tRating
- * tTrack
- * tUser
+   * tAlbum
+   * tArtist
+   * tGenre
+   * tRating
+   * tTrack
+   * tUser
 
  A simple selection might look like::
    tArtist.select([tArtist.c.artist_id]).execute.fetchall()
