@@ -1,9 +1,9 @@
 Required Packages
 =================
- * Django==1.2
- * Fabric==1.0.1
- * SQLAlchemy==0.6.6
- * psycopg2==2.4
+- Django==1.2
+- Fabric==1.0.1
+- SQLAlchemy==0.6.6
+- psycopg2==2.4
 
 Usage
 =====
@@ -30,15 +30,20 @@ The API can be accesed via:
 
 Tables
 ------
-   * tAlbum
-   * tArtist
-   * tGenre
-   * tRating
-   * tTrack
-   * tUser
+- tAlbum
+- tArtist
+- tGenre
+- tRating
+- tTrack
+- tUser
 
- A simple selection might look like::
-   tArtist.select([tArtist.c.artist_id]).execute.fetchall()
+A simple selection might look like::
+  tArtist.select([tArtist.c.artist_id]).execute.fetchall()
 
+
+SQLAlchemy Tutorials
+--------------------
 More information can be found at the SQLAlchemy website.
 
+- `A SQL Expression Language Tutorial by SQLAlchemy <http://www.sqlalchemy.org/docs/core/tutorial.html#using-joins>`_
+- `A step-by-step SQLAlchemy tutorial <http://www.rmunn.com/sqlalchemy-tutorial/tutorial.html>`_
