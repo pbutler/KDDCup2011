@@ -14,6 +14,7 @@ import os
 from kddcup2011 import *
 #from kddcup2011.data.models import *
 import datetime
+import glob
 from django.db import connection, transaction
 from django.db.models.fields.related import ManyToManyField
 
@@ -131,9 +132,9 @@ def readDatas(dir):
     data.close()
 
     print "."
-    filesandmodels = [ ("trainIdx1.firstLines.txt", 1),
-        ("validationIdx1.firstLines.txt", 2),
-        ("testIdx1.firstLines.txt", 3),
+    filesandmodels = [ ("trainIdx1*txt", 1),
+        ("validationIdx1*txt", 2),
+        ("testIdx1*txt", 3),
         ]
     print "Ratings",
     users = {}
@@ -141,6 +142,8 @@ def readDatas(dir):
     i = Importer(conn, tRating, parent=iu)
     rid = 0
     for file, type in filesandmodels:
+        file = os.path.join(dir, file)
+        file = glob.glob(file)[0]
         print file,
         data = open(os.path.join(dir, file))
         for line in data:
