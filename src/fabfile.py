@@ -16,5 +16,8 @@ def select_psqltest():
     local("echo psqltest > kddcup2011/.dbrc")
 def select_psql2011():
     local("echo psql2011 > kddcup2011/.dbrc")
+
+def select_mysql2011():
+    local("echo mysql2011 > kddcup2011/.dbrc")
 def select_sqlite():
     local("echo sqlite > kddcup2011/.dbrc")

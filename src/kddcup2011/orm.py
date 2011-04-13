@@ -50,7 +50,7 @@ track_genre = Table('data_track_genres', Base.metadata,
 
 class User(Base,SQLData):
     __tablename__ = 'data_user'
-    user_id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, primary_key=True, autoincrement=False)
 
     def __init__(self, user_id): #title=None, num_words=None, time=None, hash=None):
         self.user_id = user_id
@@ -81,20 +81,20 @@ class Rating(Base, SQLData):
 
 class Genre(Base, SQLData):
     __tablename__ = 'data_genre'
-    genre_id = Column(Integer, primary_key=True)
+    genre_id = Column(Integer, primary_key=True, autoincrement=False)
     def __init__(self, genre_id = None):
         self.genre_id = genre_id
 
 class Artist(Base, SQLData):
     __tablename__ = 'data_artist'
-    artist_id = Column(Integer, primary_key=True)
+    artist_id = Column(Integer, primary_key=True, autoincrement=False)
 
     def __init__(self, artist_id = None):
        self.artist_id = artist_id
 
 class Album(Base, SQLData):
     __tablename__ = 'data_album'
-    album_id = Column(Integer, primary_key=True)
+    album_id = Column(Integer, primary_key=True, autoincrement=False)
     artist_id   = Column(Integer, ForeignKey('data_artist.artist_id'))
     artist = relation(Artist, backref=backref('albums'))
     genres = relation("Genre", secondary=album_genre, backref="albums")
@@ -112,7 +112,7 @@ class Album(Base, SQLData):
 
 class Track(Base, SQLData):
     __tablename__ = 'data_track'
-    track_id = Column(Integer, primary_key=True)
+    track_id = Column(Integer, primary_key=True, autoincrement = False)
     artist_id   = Column(Integer, ForeignKey('data_artist.artist_id'))
     artist = relation(Artist, backref=backref('tracks'))
     album_id   = Column(Integer, ForeignKey('data_album.album_id'))

@@ -33,6 +33,11 @@ DBS = {
           { "engine" : 'django.db.backends.postgresql_psycopg2',
             "name"   : "kddcup2011",
             "uri"    : "postgresql://localhost/kddcup2011"},
+
+        "mysql2011" :
+          { "engine" : 'django.db.backends.mysql',
+            "name"   : "kddcup2011",
+            "uri"    : "mysql://localhost/kddcup2011"},
       }
 
 DATABASES = {

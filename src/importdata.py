@@ -19,7 +19,7 @@ from django.db import connection, transaction
 from django.db.models.fields.related import ManyToManyField
 
 class Importer(object):
-    def __init__(self, conn, table, max = 100000, parent = None):
+    def __init__(self, conn, table, max = 50000, parent = None):
         self.conn = conn
         self.table = table
         self.max = max
@@ -38,8 +38,10 @@ class Importer(object):
                 self.parent.execute() #finish(notchildren = True)
         sys.stdout.write("o")
         sys.stdout.flush()
-        self.conn.execute( self.table.insert(), self.objs)
-        #       self.table.insert().execute(self.objs)
+        try:
+            self.conn.execute( self.table.insert(), self.objs)
+        except Exception, e:
+            raise e
         self.objs = []
 
     def finish(self, notchildren = False):
@@ -49,9 +51,10 @@ class Importer(object):
     def __del__(self):
         self.finish()
 
-def readDatas(dir):
+def readDatas(dir, opts):
     start = time.time()
-    tRating.drop(checkfirst=True)
+    if opts.ratings:
+        tRating.drop(checkfirst=True)
     orm.album_genre.drop(checkfirst=True)
     orm.track_genre.drop(checkfirst=True)
     tTrack.drop(checkfirst=True)
@@ -59,7 +62,8 @@ def readDatas(dir):
     tArtist.drop(checkfirst=True)
     tGenre.drop(checkfirst=True)
     tUser.drop(checkfirst=True)
-    orm.metadata.drop_all(engine)
+    if opts.ratings:
+        orm.metadata.drop_all(engine)
     orm.metadata.create_all(engine)
     conn = engine.connect()
     trans = conn.begin()
@@ -97,7 +101,7 @@ def readDatas(dir):
         i.add( { 'album_id' : id, 'artist_id' : artistid} )
         for g in row[2:]:
             g = int(g)
-            iag.add( { 'artist_id' : id, 'genre_id' : g})
+            iag.add( { 'album_id' : id, 'genre_id' : g})
     i.finish()
     iag.finish()
     del iag
@@ -132,44 +136,49 @@ def readDatas(dir):
     data.close()
 
     print "."
-    filesandmodels = [ ("trainIdx1*txt", 1),
-        ("validationIdx1*txt", 2),
-        ("testIdx1*txt", 3),
-        ]
-    print "Ratings",
-    users = {}
-    iu = Importer(conn, tUser)
-    i = Importer(conn, tRating, parent=iu)
-    rid = 0
-    for file, type in filesandmodels:
-        file = os.path.join(dir, file)
-        file = glob.glob(file)[0]
-        print file,
-        data = open(os.path.join(dir, file))
-        for line in data:
-            user, nratings = [ int(c) for c in line.strip().split("|") ]
-            if user not in users:
-                users[user] = 1
-                iu.add({ 'user_id' : user} )
-            for n in range(int(nratings)):
-                line = data.next()
-                if type != 3:
-                    item, score, day, timestamp = line.strip().split("\t")
-                    score = int(score)
-                else:
-                    item, day, timestamp = line.strip().split("\t")
-                    score = None
-                hour, minu, sec = timestamp.split(":")
-                dt = datetime.datetime.min + datetime.timedelta(int(day))
-                dt = dt.replace(hour = int(hour), minute = int(minu), second = int(sec))
-                rid += 1
-                i.add( {'item_id' : int(item), 'timestamp': dt, 'score': score,
-                    'type': type, 'user_id' : user})
-    iu.finish()
-    i.finish()
-    del iu
-    print "."
+
+    if opts.ratings:
+        filesandmodels = [ ("trainIdx1*txt", 1),
+            ("validationIdx1*txt", 2),
+            ("testIdx1*txt", 3),
+            ]
+
+        print "Ratings",
+        users = {}
+        iu = Importer(conn, tUser)
+        i = Importer(conn, tRating, parent=iu)
+        rid = 0
+        ref = datetime.datetime(1990, 1,1)
+        for file, type in filesandmodels:
+            file = os.path.join(dir, file)
+            file = glob.glob(file)[0]
+            print file,
+            data = open(os.path.join(dir, file))
+            for line in data:
+                user, nratings = [ int(c) for c in line.strip().split("|") ]
+                if user not in users:
+                    users[user] = 1
+                    iu.add({ 'user_id' : user} )
+                for n in range(int(nratings)):
+                    line = data.next()
+                    if type != 3:
+                        item, score, day, timestamp = line.strip().split("\t")
+                        score = int(score)
+                    else:
+                        item, day, timestamp = line.strip().split("\t")
+                        score = None
+                    hour, minu, sec = timestamp.split(":")
+                    dt = ref + datetime.timedelta(int(day))
+                    dt = dt.replace(hour = int(hour), minute = int(minu), second = int(sec))
+                    rid += 1
+                    i.add( {'item_id' : int(item), 'timestamp': dt, 'score': score,
+                        'type': type, 'user_id' : user})
+        iu.finish()
+        i.finish()
+        del iu
+        print "."
     stop = time.time()
+
     try:
         trans.commit()
     except Exception, e:
@@ -184,13 +193,16 @@ def main(args):
     parser.add_option("-q", "--quiet",
                       action="store_false", dest="verbose", default=True,
                       help="don't print status messages to stdout")
+    parser.add_option("-r", "--no-ratings",
+                      action="store_false", dest="ratings", default=True,
+                      help="don't import ratings")
     (options, args) = parser.parse_args()
 
     if len(args) < 1:
         parser.error("Not enough arguments given")
 
 
-    readDatas(args[0])
+    readDatas(args[0], options)
     #print len(list(User.select())), len(list(Rating.select()))
     return 0
 

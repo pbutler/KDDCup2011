@@ -35,4 +35,6 @@ tGenre = orm.Genre.__table__
 tArtist = orm.Artist.__table__
 tAlbum = orm.Album.__table__
 tTrack = orm.Track.__table__
+tAlbumGenre = orm.album_genre
+tTrackGenre = orm.track_genre
 
