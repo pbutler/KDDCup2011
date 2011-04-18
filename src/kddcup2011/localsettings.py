@@ -38,6 +38,10 @@ DBS = {
           { "engine" : 'django.db.backends.mysql',
             "name"   : "kddcup2011",
             "uri"    : "mysql://localhost/kddcup2011"},
+        "mysqltmp":
+          { "engine" : 'django.db.backends.mysql',
+            "name"   : "kddcup2011",
+            "uri"    : "mysql://localhost/kddcuptmp"},
       }
 
 DATABASES = {

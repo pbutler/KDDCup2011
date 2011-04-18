@@ -60,12 +60,14 @@ class User(Base,SQLData):
 
 class Rating(Base, SQLData):
     __tablename__ = 'data_rating'
-    rating_id  = Column(Integer, primary_key=True, autoincrement=True)
-    item_id  = Column(Integer) #, primary_key=True)
+    #rating_id  = Column(Integer, primary_key=True, autoincrement=True)
+    item_id  = Column(Integer,  primary_key=True)
     timestamp          = Column(DateTime)
     score = Column(Integer)
-    user_id   = Column(Integer, ForeignKey('data_user.user_id'))
+    user_id   = Column(Integer, ForeignKey('data_user.user_id'),
+            primary_key=True)
     user = relation(User, backref=backref('ratings'))
+    type = Column(Integer)
 
     def __init__(self, item_id = None, timestamp = None, score= None, user=None):
         self.rating_id = None #rating_id
