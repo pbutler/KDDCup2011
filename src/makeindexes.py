@@ -18,11 +18,27 @@ import glob
 from django.db import connection, transaction
 from django.db.models.fields.related import ManyToManyField
 
+def maketypes():
+    start = time.time()
+    conn = engine.connect()
+
+    tRating.update().values(type=1).where(tRating.c.item_id.in_(select([tTrack.c.track_id])))
+    tRating.update().values(type=2).where(tRating.c.item_id.in_(select([tArtist.c.artist_id])))
+    tRating.update().values(type=3).where(tRating.c.item_id.in_(select([tAlbum.c.album_id])))
+    tRating.update().values(type=4).where(tRating.c.item_id.in_(select([tGenre.c.genre_id])))
+    stop = time.time()
+
+    conn.close()
+    print "Index created in %d seconds" % (stop -start)
+
 def makeindexes():
     start = time.time()
     conn = engine.connect()
     trans = conn.begin()
-    idx = Index("item_id", tRating.c.item_id)
+    maketypes()
+    idx = Index("item_id_type", tRating.c.item_id, tRating.c.type)
+    idx.create()
+    idx = Index("user_id_type", tRating.c.user_id, tRating.c.type)
     idx.create()
     stop = time.time()
 
