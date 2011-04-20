@@ -37,4 +37,6 @@ tAlbum = orm.Album.__table__
 tTrack = orm.Track.__table__
 tAlbumGenre = orm.album_genre
 tTrackGenre = orm.track_genre
+tRatingV = orm.RatingV.__table__
+tRatingT = orm.RatingT.__table__
 

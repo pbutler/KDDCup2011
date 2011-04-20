@@ -27,7 +27,7 @@ class Importer(object):
         self.objs = []
 
     def add(self, obj):
-        self.objs += [ obj ]
+        self.objs += [ obj.copy() ]
         if len(self.objs) >= self.max:
             self.execute()
 
@@ -55,6 +55,8 @@ def readDatas(dir, opts):
     start = time.time()
     if opts.ratings:
         tRating.drop(checkfirst=True)
+        tRatingV.drop(checkfirst=True)
+        tRatingT.drop(checkfirst=True)
     orm.album_genre.drop(checkfirst=True)
     orm.track_genre.drop(checkfirst=True)
     tTrack.drop(checkfirst=True)
@@ -138,18 +140,17 @@ def readDatas(dir, opts):
     print "."
 
     if opts.ratings:
-        filesandmodels = [ ("trainIdx1*txt", 1),
-            ("validationIdx1*txt", 2),
-            ("testIdx1*txt", 3),
+        filesandmodels = [ ("trainIdx1*txt", 1, tRating),
+            ("validationIdx1*txt", 2, tRatingV),
+            ("testIdx1*txt", 3, tRatingT),
             ]
 
-        print "Ratings",
+        print "Ratings"
         users = {}
         iu = Importer(conn, tUser)
-        i = Importer(conn, tRating, parent=iu)
-        rid = 0
         ref = datetime.datetime(1990, 1,1)
-        for file, type in filesandmodels:
+        for file, type, table in filesandmodels:
+            i = Importer(conn, table, parent=iu)
             file = os.path.join(dir, file)
             file = glob.glob(file)[0]
             print file,
@@ -158,23 +159,27 @@ def readDatas(dir, opts):
                 user, nratings = [ int(c) for c in line.strip().split("|") ]
                 if user not in users:
                     users[user] = 1
-                    iu.add({ 'user_id' : user} )
+                    #iu.add({ 'user_id' : user} )
+
+                values = {}
+                values['user_id'] = user
                 for n in range(int(nratings)):
                     line = data.next()
-                    if type != 3:
+                    if type != 3: #table != tRatingT:
                         item, score, day, timestamp = line.strip().split("\t")
-                        score = int(score)
+                        values['score'] = int(score)
                     else:
                         item, day, timestamp = line.strip().split("\t")
                         score = None
                     hour, minu, sec = timestamp.split(":")
                     dt = ref + datetime.timedelta(int(day))
                     dt = dt.replace(hour = int(hour), minute = int(minu), second = int(sec))
-                    rid += 1
-                    i.add( {'item_id' : int(item), 'timestamp': dt, 'score': score,
-                        'type': type, 'user_id' : user})
+                    values['item_id'] = int(item)
+                    values['timestamp'] = dt
+                    i.add(values)
+            i.finish()
+            print
         iu.finish()
-        i.finish()
         del iu
         print "."
     stop = time.time()

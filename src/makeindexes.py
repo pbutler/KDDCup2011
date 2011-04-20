@@ -22,13 +22,23 @@ def maketypes():
     start = time.time()
     conn = engine.connect()
 
-    tRating.update().values(type=1).where(tRating.c.item_id.in_(select([tTrack.c.track_id])))
-    tRating.update().values(type=2).where(tRating.c.item_id.in_(select([tArtist.c.artist_id])))
-    tRating.update().values(type=3).where(tRating.c.item_id.in_(select([tAlbum.c.album_id])))
-    tRating.update().values(type=4).where(tRating.c.item_id.in_(select([tGenre.c.genre_id])))
+    conn.execute( tRating.update().values(type=1).where(tRating.c.item_id.in_(select([tTrack.c.track_id]))))
+    conn.execute( tRating.update().values(type=2).where(tRating.c.item_id.in_(select([tArtist.c.artist_id]))))
+    conn.execute( tRating.update().values(type=3).where(tRating.c.item_id.in_(select([tAlbum.c.album_id]))))
+    conn.execute( tRating.update().values(type=4).where(tRating.c.item_id.in_(select([tGenre.c.genre_id]))))
+
+    conn.execute( tRatingT.update().values(type=1).where(tRatingT.c.item_id.in_(select([tTrack.c.track_id]))))
+    conn.execute( tRatingT.update().values(type=2).where(tRatingT.c.item_id.in_(select([tArtist.c.artist_id]))))
+    conn.execute( tRatingT.update().values(type=3).where(tRatingT.c.item_id.in_(select([tAlbum.c.album_id]))))
+    conn.execute( tRatingT.update().values(type=4).where(tRatingT.c.item_id.in_(select([tGenre.c.genre_id]))))
+
+
+    conn.execute( tRatingV.update().values(type=1).where(tRatingV.c.item_id.in_(select([tTrack.c.track_id]))))
+    conn.execute( tRatingV.update().values(type=2).where(tRatingV.c.item_id.in_(select([tArtist.c.artist_id]))))
+    conn.execute( tRatingV.update().values(type=3).where(tRatingV.c.item_id.in_(select([tAlbum.c.album_id]))))
+    conn.execute( tRatingV.update().values(type=4).where(tRatingV.c.item_id.in_(select([tGenre.c.genre_id]))))
     stop = time.time()
 
-    conn.close()
     print "Index created in %d seconds" % (stop -start)
 
 def makeindexes():
@@ -40,13 +50,25 @@ def makeindexes():
     idx.create()
     idx = Index("user_id_type", tRating.c.user_id, tRating.c.type)
     idx.create()
-    stop = time.time()
 
+
+    idx = Index("item_id_typeV", tRatingV.c.item_id, tRatingV.c.type)
+    idx.create()
+    idx = Index("user_id_typeV", tRatingV.c.user_id, tRatingV.c.type)
+    idx.create()
+
+    idx = Index("item_id_typeT", tRatingT.c.item_id, tRatingT.c.type)
+    idx.create()
+    idx = Index("user_id_typeT", tRatingT.c.user_id, tRatingT.c.type)
+    idx.create()
+    conn.execute( "INSERT INTO data_user %s" %
+            (select([func.distinct(tRating.c.user_id)])))
     try:
         trans.commit()
     except Exception, e:
         print e
     conn.close()
+    stop = time.time()
     print "Index created in %d seconds" % (stop -start)
 
 def main(args):
@@ -56,15 +78,18 @@ def main(args):
     parser.add_option("-q", "--quiet",
                       action="store_false", dest="verbose", default=True,
                       help="don't print status messages to stdout")
-    parser.add_option("-r", "--no-ratings",
-                      action="store_false", dest="ratings", default=True,
+    parser.add_option("-m", "--make-types",
+                      action="store_false", dest="all", default=True,
                       help="don't import ratings")
     (options, args) = parser.parse_args()
 
     if len(args) < 0:
         parser.error("Not enough arguments given")
 
-    makeindexes()
+    if not options.all:
+        maketypes()
+    else:
+        makeindexes()
     return 0
 
 if __name__ == "__main__":

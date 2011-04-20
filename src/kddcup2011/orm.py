@@ -60,12 +60,11 @@ class User(Base,SQLData):
 
 class Rating(Base, SQLData):
     __tablename__ = 'data_rating'
-    #rating_id  = Column(Integer, primary_key=True, autoincrement=True)
-    item_id  = Column(Integer,  primary_key=True)
+    item_id  = Column(Integer,  primary_key=True, autoincrement=False)
     timestamp          = Column(DateTime)
     score = Column(Integer)
     user_id   = Column(Integer, ForeignKey('data_user.user_id'),
-            primary_key=True)
+            primary_key=True, autoincrement=False)
     user = relation(User, backref=backref('ratings'))
     type = Column(Integer)
 
@@ -112,7 +111,7 @@ class Album(Base, SQLData):
         return "<Album(%s): by %s in %d genres>" % ( self.album_id,
                 self.artist_id, len(self.genres))
 
-class Track(Base, SQLData):
+class Track (Base, SQLData):
     __tablename__ = 'data_track'
     track_id = Column(Integer, primary_key=True, autoincrement = False)
     artist_id   = Column(Integer, ForeignKey('data_artist.artist_id'))
@@ -131,6 +130,46 @@ class Track(Base, SQLData):
     def __repr__(self):
         return "<Track(%s): by %s in %d genres>" % ( self.album_id,
                 self.artist_id, len(self.genres))
+
+class RatingV(Base, SQLData):
+    __tablename__ = 'data_rating_verification'
+    item_id  = Column(Integer,  primary_key=True, autoincrement = False)
+    timestamp          = Column(DateTime)
+    score = Column(Integer)
+    user_id   = Column(Integer, ForeignKey('data_user.user_id'),
+            primary_key=True, autoincrement = False)
+    user = relation(User, backref=backref('ratings'))
+    type = Column(Integer)
+
+    def __init__(self, item_id = None, timestamp = None, score= None, user=None):
+        self.rating_id = None #rating_id
+        self.item_id = item_id
+        self.timestamp = timestamp
+        self.score = score
+        self.user = user
+
+    def __repr__(self):
+        return "<Rating(%s): %s of %s @ %s>" % (self.rating_id, self.item_id,
+                self.score, self.timestamp)
+
+class RatingT(Base, SQLData):
+    __tablename__ = 'data_rating_testing'
+    item_id  = Column(Integer,  primary_key=True, autoincrement = False)
+    timestamp          = Column(DateTime)
+    user_id   = Column(Integer, ForeignKey('data_user.user_id'),
+            primary_key=True, autoincrement = False)
+    user = relation(User, backref=backref('ratings'))
+    type = Column(Integer)
+
+    def __init__(self, item_id = None, timestamp = None, user=None):
+        self.rating_id = None #rating_id
+        self.item_id = item_id
+        self.timestamp = timestamp
+        self.user = user
+
+    def __repr__(self):
+        return "<Rating(%s): %s  @ %s>" % (self.rating_id, self.item_id,
+                self.score)
 def main(args):
     import  optparse
     parser = optparse.OptionParser()
