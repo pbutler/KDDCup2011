@@ -8,10 +8,14 @@ Python source code - replace this with a description of the code and write the c
 __author__ = 'Patrick Butler'
 __email__  = 'pbutler@killertux.org'
 
+import heapq
 import itertools
 import time
-from kddcup2011 import *
 import sys
+
+from kddcup2011 import *
+
+PRUNETIME = 10
 def get_users_rating(itemid, type):
     s = select( [tRating.c.user_id] ).where( and_(tRating.c.type == type,
         tRating.c.item_id == itemid))
@@ -30,66 +34,97 @@ def get_item_rating(itemid, type):
 #    return [itemid for itemid,  in conn.execute(s) ]
 
 def get_all_users_ratings(userids, type, i):
-    s = select( [tRating.c.user_id, tRating.c.item_id, tRating.c.score] ).where( and_(tRating.c.type == type,
+    s = select( [tRating.c.item_id, tRating.c.user_id, tRating.c.score] ).where( and_(tRating.c.type == type,
         tRating.c.user_id.in_(userids),
-        tRating.c.item_id > i)).order_by(tRating.c.item_id)
+        tRating.c.item_id > i)).order_by(tRating.c.user_id, tRating.c.item_id)
     return [a for a in conn.execute(s) ]
+
+class RatingCache(object):
+    def __init__(self, connect):
+        self.conn = connect
+        self.data = {}
+        self.max = 100
+        self.lastprune = 0
+
+    def prune(self, keep, mini):
+        keepers = dict( zip(keep, range(len(keep))))
+        for key in self.data.keys():
+            if key not in keepers:
+                del self.data[key]
+            else:
+                self.data[key] = [ (i,u,s) for i,u,s in self.data[key] if i > mini ]
+    def relax(self, mini):
+        for key in self.data.keys():
+            self.data[key] = [ (i,u,s) for i,u,s in self.data[key] if i > mini ]
+
+    def get_users(self, users, type, mini):
+        self.lastprune += 1
+        if len(self.data) > self.max:
+            self.lastprune = 0
+            self.prune(users)
+        if self.lastprune >= PRUNETIME:
+            self.lastprune = 0
+            self.relax(mini)
+
+        newusers = [ user for user in users if user not in self.data ]
+        if len(newusers) > 0:
+            newratings = get_all_users_ratings(newusers, type, mini)
+            #sys.stderr.write("*%d/%d*\n" % (len(newusers), len(users)))
+            for user, g in itertools.groupby(newratings, lambda x: x[1]):
+                self.data[user] = list(g)
+            for user in newusers:
+                if user not in self.data:
+                    self.data[user] =[]
+        listiters = [ ( (i,u,s) for i,u,s in self.data[user] if i > mini) for user in users ]
+        return heapq.merge(*listiters)
+
 
 def main(args):
     import  optparse
-    global conn
+    global conn, PRUNETIME
     parser = optparse.OptionParser()
     parser.usage = __doc__
     parser.add_option("-q", "--quiet",
                       action="store_false", dest="verbose", default=True,
                       help="don't print status messages to stdout")
+    parser.add_option("-p", "--prunetime",
+                      action="store", dest="prune", type=int, default=10,
+                      help="don't print status messages to stdout")
     (options, args) = parser.parse_args()
     if len(args) < 0:
         parser.error("Not enough arguments given")
 
+    PRUNETIME = options.prune
     conn = engine.connect()
+    start = time.time()
+    Abar()
+    stop = time.time()
+    print "done", stop-start
+
+def Abar():
     s = select([tRating.c.item_id]).where(tRating.c.type==1).group_by(tRating.c.item_id) #.having(func.count() >1))
     result = conn.execute(s)
     print s
     print "Start"
-    start = time.time()
     items = [ int(r) for r, in result ]
     items.sort()
     done = {}
     print len(items)
     cnt = 0
+    rc = RatingCache(conn)
     for i in items:
         cnt += 1
         ratings = get_item_rating(i, 1)
         userids = ratings.keys()
-        results = get_all_users_ratings(userids, 1, i)
-        sys.stderr.write("%s %s %s\n" % (i,cnt,len(results) ))
-        for j, g in itertools.groupby(results, lambda x: x[1]):
+        #sys.stderr.write("%s %s\n" % (i,cnt))
+        results = rc.get_users(userids, 1, i)
+        for j, g in itertools.groupby(results, lambda x: x[0]):
             g = list(g)
             n = float(len(g))
-            abar = sum([ ratings[uid]*score for uid, jj, score in g]) / n
+            abar = sum([ ratings[uid]*score for jj, uid, score in g]) / n
             print i,j,abar
 
 
-#        sys.stderr.write(">"); sys.stderr.flush()
-#        users = get_users_rating(i, 1)
-#        sys.stderr.write(">"); sys.stderr.flush()
-#        subitems =[ j for j in  get_items_users_rate(users, 1) if j > i]
-#        sys.stderr.write("%s" % len(subitems))
-#        for j in subitems:
-#            s = select( [ func.max(tRating.c.score),
-#                func.min(tRating.c.score)  ] ).where( and_(tRating.c.type==1,
-#                 #   tRating.c.score != None,
-#                or_(tRating.c.item_id==i, tRating.c.item_id==j))
-#                ).group_by(tRating.c.user_id).having(func.count() == 2)
-#            result = conn.execute(s).fetchall()
-#            l = len(result)
-#            lf = float(l)
-#            #print i, j, sum([ a*b for a,b in result]) / lf
-#        print
-    stop = time.time()
-    print "done", stop-start
-    return 0
 
 if __name__ == "__main__":
     import sys
