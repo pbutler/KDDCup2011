@@ -1,3 +1,7 @@
 *.pyc
 .*swp
 *.sqlite
+*.mmap
+*.so
+cache
+.dbrc

@@ -8,17 +8,17 @@ Python source code - replace this with a description of the code and write the c
 __author__ = 'Patrick Butler'
 __email__  = 'pbutler@killertux.org'
 
-user_t   = 'int, int' #ncount, sum
-track_t  = 'int, int, int, float, float' #id, count, sum, avg, pavg
-rating_t = 'int,int,int,int' #user, movie, rating, cache
-
 import os
 import numpy as np
 cimport numpy as np
 import cPickle as pickle
 
+user_t   = 'int, int' #ncount, sum
+track_t  = 'int, int, int, float, float' #id, count, sum, avg, pavg
+rating_t = [('user', np.int), ('track', np.int), ('rating', np.int), ('cache', np.int)]
+
 cdef struct rating_struct:
-    int a,b,c,d
+    np.int_t user, track, rating, cache
 
 
 INIT = 0.1
@@ -27,7 +27,6 @@ class SVD(object):
     def __init__(self, dir, nFeatures = 10):
         self.dir = dir
         self.tmap = {}
-        self.nFeatures = nFeatures
         stats = open(os.path.join(dir, "info.txt")).readlines()
         stats = [ x.strip().split("=") for  x in stats]
         stats = dict( [ (k,int(v)) for k,v in stats] )
@@ -46,7 +45,9 @@ class SVD(object):
         trackFile.close()
 
         self.nratings = 0
-        self.ratings = np.ndarray(int(stats['nRatings']), dtype=rating_t)
+        self.ratings = np.ndarray(int(stats['nRatings']),
+                dtype=rating_t)
+        #rating_t)
         trainFile = open(os.path.join(dir, "trainIdx1.txt"))
         uidx = 0
         ridx = 0
@@ -84,7 +85,7 @@ class SVD(object):
             else:
                 self.tracks[i][3] = tot / n
             self.tracks[i][4] = ( ( 50*25 + tot) / (25 + n))
-        self.initFeatures()
+        self.initFeatures(nFeatures)
         self.save()
 
     def initFeatures(self, nFeatures):
@@ -147,17 +148,20 @@ class SVD(object):
     def train_all(self, nepochs = 10):
         shortPredict = self.shortPredict
         cdef np.ndarray[rating_struct, ndim=1] ratings = self.ratings
+        #ratings = self.ratings
         cdef int f
         cdef int e
         cdef int r
-        cdef int u
-        cdef int t
-        cdef int s
+        cdef np.int_t u
+        cdef np.int_t t
+        cdef np.int_t s
+        cdef np.int_t c
         cdef np.float_t p
         cdef np.float_t sq
         cdef np.float_t err
         cdef np.float_t uf
         cdef np.float_t tf
+        #cdef rating_struct rating
         cdef np.ndarray[np.float_t, ndim=2] userFeatures = self.userFeatures
         cdef np.ndarray[np.float_t, ndim=2] trackFeatures = self.trackFeatures
         for f in range(self.nFeatures):
@@ -165,7 +169,10 @@ class SVD(object):
             for e in range(nepochs):
                 sq = 0.
                 for r in range(len(ratings)):
-                    u, t, s, c = ratings[r]
+                    u = ratings[r].user
+                    t = ratings[r].track
+                    s = ratings[r].rating
+                    c = ratings[r].cache
                     p = shortPredict(u, t, f, c, True)
                     err =  s - p
                     sq += err**2
@@ -177,9 +184,10 @@ class SVD(object):
                 print "  epoch=%d RMSE=%f" % (e, (sq/len(ratings))**.5)
 
             for r in range(len(ratings)):
-                u, t, s, c = ratings[r]
-                ratings[r].d = shortPredict(u,t, f, c, False)
-                #ratings[r][3] = shortPredict(u,t, f, c, False)
+                u = ratings[r].user
+                t = ratings[r].track
+                c = ratings[r].cache
+                ratings[r].cache = shortPredict(u,t, f, c, False)
 
     def shortPredict(self, user, track, f, cache, trailing):
         if f > 0:

@@ -12,10 +12,12 @@ user_t   = 'int, int' #ncount, sum
 track_t  = 'int, int, int, float, float' #id, count, sum, avg, pavg
 rating_t = 'int,int,int,int' #user, movie, rating, cache
 
+from svdslow import SVD as SVDslow
 try:
     from svd import SVD
+    print "Loaded Fast SVD"
 except ImportError:
-    from svdslow import SVD
+    SVD = SVDslow
 
 def main(args):
     import  optparse
@@ -33,16 +35,23 @@ def main(args):
     parser.add_option("-e", "--epochs",
                       action="store", type=int, dest="nepochs", default=10,
                       help="train through nepochs")
+    parser.add_option("-s", "--slow",
+                      action="store_true", dest="slow",
+                      help="use non cython model (probably will be obsolete")
 
     (options, args) = parser.parse_args()
     if len(args) < 1:
         parser.error("Not enough arguments given")
+
+    if options.slow:
+        global SVD
+        SVD = SVDslow
     if options.load:
         svd = SVD.load(args[0], options.nFeatures)
         svd.train_all(options.nepochs)
     else:
         svd = SVD(args[0], options.nFeatures)
-        svd.dump("cache")
+        svd.dump()
 
 
     return 0
