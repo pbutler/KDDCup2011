@@ -47,7 +47,7 @@ class SVD(object):
 
         self.nratings = 0
         self.ratings = np.ndarray(int(stats['nRatings']), dtype=rating_t)
-        trainFile = open(os.path.join(dir, "trainIdx1.firstlines.txt"))
+        trainFile = open(os.path.join(dir, "trainIdx1.txt"))
         uidx = 0
         ridx = 0
         for line in trainFile:

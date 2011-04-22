@@ -39,11 +39,11 @@ def main(args):
         parser.error("Not enough arguments given")
     if options.load:
         svd = SVD.load(args[0], options.nFeatures)
+        svd.train_all(options.nepochs)
     else:
         svd = SVD(args[0], options.nFeatures)
         svd.dump("cache")
 
-    svd.train_all(options.nepochs)
 
     return 0
 
