@@ -13,18 +13,35 @@ import numpy as np
 cimport numpy as np
 import cPickle as pickle
 
-user_t   = 'int, int' #ncount, sum
-track_t  = 'int, int, int, float, float' #id, count, sum, avg, pavg
-rating_t = [('user', np.int), ('track', np.int), ('rating', np.int), ('cache', np.int)]
+user_t   = [('count', np.int), ('sum', int)]
+track_t  = [('id', np.int), ('count', np.int ), ('sum', np.int ), 
+            ('avg', np.float ), ('pavg', np.float)]
+rating_t = [('user', np.int32), ('track', np.int32), ('rating', np.uint8),
+        ('cache', np.int32)]
 
-cdef struct rating_struct:
-    np.int_t user, track, rating, cache
+cdef packed struct user_s:
+    np.int_t count
+    np.int_t sum
+
+cdef packed struct track_s:
+    np.int_t id
+    np.int_t count
+    np.int_t sum
+    np.float_t avg
+    np.float_t pavg
+
+cdef packed struct rating_s:
+    np.int32_t user
+    np.int32_t track
+    np.uint8_t rating
+    np.int32_t cache
 
 
 INIT = 0.1
 
 class SVD(object):
     def __init__(self, dir, nFeatures = 10):
+        cdef int tidx, ridx, uidx, i, id
         self.dir = dir
         self.tmap = {}
         stats = open(os.path.join(dir, "info.txt")).readlines()
@@ -32,59 +49,66 @@ class SVD(object):
         stats = dict( [ (k,int(v)) for k,v in stats] )
         self.stats = stats
 
-        self.users  = np.ndarray(stats['nUsers'], dtype=user_t)
-        self.tracks = np.ndarray(stats['nTracks'], dtype=track_t)
+        cdef np.ndarray[user_s, ndim=1] users  = np.ndarray(stats['nUsers'], dtype=user_t)
+        cdef np.ndarray[track_s, ndim=1] tracks = np.ndarray(stats['nTracks'], dtype=track_t)
+        cdef np.ndarray[rating_s,ndim=1] ratings=np.ndarray(stats['nRatings'], dtype=rating_t)
         trackFile = open(os.path.join(dir, "trackData1.txt"))
         tidx = 0
         for line in trackFile:
             data = line.strip().split("|")
             t = int(data[0])
-            self.tracks[tidx]= (t, 0, 0, 0, 0)
+            tracks[tidx].id = t
+            tracks[tidx].sum = 0
+            tracks[tidx].count = 0
             self.tmap[t] = tidx
             tidx += 1
         trackFile.close()
 
         self.nratings = 0
-        self.ratings = np.ndarray(int(stats['nRatings']),
-                dtype=rating_t)
-        #rating_t)
         trainFile = open(os.path.join(dir, "trainIdx1.txt"))
         uidx = 0
         ridx = 0
+        cdef int a
         for line in trainFile:
-            u, n = line.split("|") 
-            u, n = int(u), int(n)
-            print n
+            u, n = [ int(x) for x in line.split("|")  ]
             a = 0
             for i in range(n):
                 line = trainFile.next()
-                id, score, day, time = line.strip().split("\t")
-                id = int(id)
+                sid, score, day, time = line.strip().split("\t")
+                id = int(sid)
                 score = int(score)
                 if id not in self.tmap:
                     n -= 1
                     continue
                 a += score
                 id = self.tmap[id]
-                self.ratings[ridx] = (uidx, id, score, -1)
-                self.tracks[id][1] += 1
-                self.tracks[id][1] += score
+                ratings[ridx].user = uidx
+                ratings[ridx].track = id
+                ratings[ridx].rating = score
+                tracks[id].count += 1
+                tracks[id].sum += score
                 ridx += 1
             if n == 0:
                 continue
-            self.users[uidx] = (n, a)
+            users[uidx].count = n
+            users[uidx].sum = a 
             uidx += 1
         trainFile.close()
-        self.users.resize(uidx)
-        self.ratings.resize(ridx)
-        for i in range(len(self.tracks)):
-            n = float(self.tracks[i][1])
-            tot  = float(self.tracks[i][2])
-            if n == 0:
-                self.tracks[i][3] = 0
-            else:
-                self.tracks[i][3] = tot / n
-            self.tracks[i][4] = ( ( 50*25 + tot) / (25 + n))
+        users = np.resize(users, uidx)
+        ratings = np.resize(ratings, ridx)
+        cdef float ntrack
+        cdef float  sumtrack
+        for i in range(len(tracks)):
+            ntrack = float(tracks[i].count)
+            sumtrack  = float(tracks[i].sum)
+            tracks[i].avg = 0
+            if n > 0:
+                tracks[i].avg  = sumtrack / n
+            tracks[i].pavg = ( float( 50*25 + sumtrack) / (25 + sumtrack))
+
+        self.users = users
+        self.tracks = tracks
+        self.ratings = ratings
         self.initFeatures(nFeatures)
         self.save()
 
@@ -147,7 +171,7 @@ class SVD(object):
 
     def train_all(self, nepochs = 10):
         shortPredict = self.shortPredict
-        cdef np.ndarray[rating_struct, ndim=1] ratings = self.ratings
+        cdef np.ndarray[rating_s, ndim=1] ratings = self.ratings
         #ratings = self.ratings
         cdef int f
         cdef int e
