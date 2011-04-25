@@ -64,6 +64,7 @@ def main(args):
         else:
             import mpsvd
             mpsvd.runManySVDs(args[0], options.nprocs, options.nepochs)
+        svd.validate()
     return 0
 
 

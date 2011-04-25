@@ -16,16 +16,16 @@ import numpy as np
 import cPickle as pickle
 import time
 import multiprocessing as mp
+import random
 
-user_t   = [('count', np.uint), ('sum', np.uint)]
+user_t   = [('id', np.uint), ('count', np.uint), ('sum', np.uint)]
 track_t  = [('id', np.uint), ('count', np.uint ), ('sum', np.uint ), 
             ('avg', np.float ), ('pavg', np.float)]
 rating_t = [('user', np.uint32), ('track', np.uint32), ('rating', np.uint8),
         ('cache', np.uint16)]
 
-#rating_t = 'int32, int32, uint8, int32'
-
 cdef packed struct user_s:
+    np.uint_t id
     np.uint_t count
     np.uint_t sum
 
@@ -43,16 +43,18 @@ cdef packed struct rating_s:
     np.uint16_t cache
 
 INIT = 0.1
-
+GAMMA = .002
+LAMBDA = .04
 
 class SVD(object):
-    def __init__(self, dir, nFeatures = 10, rank = 1, nproc = 1):
+    def __init__(self, dir, nFeatures = 10, rank = 0, nproc = 1):
         cdef int tidx, ridx, uidx, i, id
         self.nProcs = nproc
         self.rank = rank
         self.proc = mp.current_process()
         self.dir = dir
         self.tmap = {}
+        self.umap = {}
         #bad way to do this but it works 
         stats = open(os.path.join(dir, "info.txt")).readlines()
         stats = [ x.strip().split("=") for  x in stats]
@@ -76,17 +78,51 @@ class SVD(object):
             tidx += 1
         trackFile.close()
 
-        self.nratings = 0
+        genreFile = open(os.path.join(dir, "genreData1.txt"))
+        for line in genreFile:
+            data = line.strip().split("|")
+            t = int(data[0])
+            tracks[tidx].id = t
+            tracks[tidx].sum = 0
+            tracks[tidx].count = 0
+            self.tmap[t] = tidx
+            tidx += 1
+        genreFile.close()
+
+        albumFile = open(os.path.join(dir, "albumData1.txt"))
+        for line in albumFile:
+            data = line.strip().split("|")
+            t = int(data[0])
+            tracks[tidx].id = t
+            tracks[tidx].sum = 0
+            tracks[tidx].count = 0
+            self.tmap[t] = tidx
+            tidx += 1
+        albumFile.close()
+
+        artistFile = open(os.path.join(dir, "artistData1.txt"))
+        for line in artistFile:
+            data = line.strip().split("|")
+            t = int(data[0])
+            tracks[tidx].id = t
+            tracks[tidx].sum = 0
+            tracks[tidx].count = 0
+            self.tmap[t] = tidx
+            tidx += 1
+        artistFile.close()
+        self.nTracks = tidx
+
         trainFile = open(os.path.join(dir, "trainIdx1.txt"))
         uidx = 0
         ridx = 0
+        self.mu = 0.
         cdef int a
         for line in trainFile:
             u, n = [ int(x) for x in line.split("|")  ]
             a = 0
             for i in range(n):
                 line = trainFile.next()
-                sid, score, day, time = line.strip().split("\t")
+                sid, score, day, tm = line.strip().split("\t")
                 id = int(sid)
                 score = int(score)
                 if id not in self.tmap:
@@ -98,18 +134,22 @@ class SVD(object):
                 ratings[ridx].track = id
                 ratings[ridx].rating = score
                 tracks[id].count += 1
-                tracks[id].sum += score
+                tracks[id].sum += <np.float_t>(score)
                 ridx += 1
             if n == 0:
                 continue
+            users[uidx].id = u
+            self.umap[u] = uidx
             users[uidx].count = n
             users[uidx].sum = a 
+            self.mu += a
             uidx += 1
         trainFile.close()
 
         self.nRatings = ridx
         self.nUsers = uidx
-
+        self.mu /= ridx
+        print "mu = %g\n" % self.mu
         cdef float ntrack
         cdef float  sumtrack
         for i in range(self.nTracks):
@@ -135,17 +175,35 @@ class SVD(object):
         self.nFeatures = nFeatures
         cdef unsigned int nUsers = self.nUsers
         cdef unsigned int nTracks = self.nTracks
+        cdef np.ndarray[user_s, ndim=1] users = self.users
+        cdef np.ndarray[track_s, ndim=1] tracks = self.tracks
+
         cdef np.ndarray[np.float_t, ndim=2] userFeatures = np.memmap(
                 os.path.join(self.dir, "userFeatures.mmap"),
                 shape=(nFeatures, nUsers), dtype=np.float, mode='w+')
         cdef np.ndarray[np.float_t, ndim=2] trackFeatures = np.memmap(
                 os.path.join(self.dir, "trackFeatures.mmap"),
                 shape=(nFeatures, nTracks), dtype=np.float, mode='w+')
+
+        cdef np.ndarray[np.float_t, ndim=1] bu = np.memmap(
+                os.path.join(self.dir, "userBline.mmap"),
+                shape=(nUsers), dtype=np.float, mode='w+')
+        cdef np.ndarray[np.float_t, ndim=1] bi = np.memmap(
+                os.path.join(self.dir, "itemBline.mmap"),
+                shape=(nTracks), dtype=np.float, mode='w+')
+
         for f in range(nFeatures):
             for i in range(nUsers):
-                userFeatures[f, i]  = INIT 
+                userFeatures[f, i]  = (random.random()*INIT *2) - INIT
             for i in range(nTracks): 
-                trackFeatures[f, i] = INIT
+                trackFeatures[f, i] = (random.random()*INIT *2) - INIT
+        for i in range(nUsers):
+            bu[i] = ( users[i].sum + self.mu*25) / (25 + users[i].count)
+
+        for i in range(nTracks):
+            bi[i] = ( tracks[i].sum + self.mu*25) / (25 + tracks[i].count)
+        self.bu = bu
+        self.bi = bi
         self.userFeatures = userFeatures
         self.trackFeatures = trackFeatures
 
@@ -189,9 +247,15 @@ class SVD(object):
         self.userFeatures = np.memmap(
                 os.path.join(self.dir, "userFeatures.mmap"),
                 shape=(self.nFeatures, self.nUsers), dtype=np.float, mode='r+')
+        self.bu = np.memmap(
+                os.path.join(self.dir, "userBline.mmap"),
+                shape=(self.nUsers), dtype=np.float, mode='r+')
+        self.bi = np.memmap(
+                os.path.join(self.dir, "itemBline.mmap"),
+                shape=(self.nTracks), dtype=np.float, mode='r+')
 
     @classmethod
-    def load(cls, dir, rank=1, nproc=1):
+    def load(cls, dir, rank=0, nproc=1):
         pklfile = os.path.join(dir, "cache")
         svd = pickle.load(open(pklfile))
         svd.nProcs = nproc
@@ -207,43 +271,104 @@ class SVD(object):
     
     @cython.boundscheck(False)
     def train_all(self, nepochs = 10):
+        cdef int lastUser = -1
         cdef np.ndarray[rating_s, ndim=1] ratings = self.ratings
         cdef unsigned int f,e,r, nRatings = self.nRatings
-        cdef np.float_t p, sq, err, uf ,tf 
+        cdef np.float_t p, sq, err, uf ,tf, tmp_bi, tmp_bu
+        cdef np.float_t mu = self.mu, ru
         cdef np.ndarray[np.float_t, ndim=2] userFeatures = self.userFeatures
         cdef np.ndarray[np.float_t, ndim=2] trackFeatures = self.trackFeatures
+        cdef np.ndarray[np.float_t, ndim=1] bu = self.bu
+        cdef np.ndarray[np.float_t, ndim=1] bi = self.bi
         cdef rating_s rating
+        cdef unsigned int f1
 
-
-        for f in range(self.nFeatures):
+        fullstart = time.time()
+        for e in range(nepochs):
             if self.nProcs > 1:
                 self.proc.barrier()
-            print "Training Feature %d" % f
-            for e in range(nepochs):
-                start = time.time()
-                sq = 0.
-                for r in range(self.rank, nRatings, self.nProcs):
-                    rating = ratings[r]
-                    p = <int>shortPredict(self, rating.user, rating.track, f,
-                            rating.cache, True)
-                    err =  rating.rating - p
-                    sq += err**2
+            start = time.time()
+            sq = 0.
+            ftotime = 0
+            lastUser = -1
+            for r in range(nRatings):
+                rating = ratings[r]
+                p = mu + bi[rating.track] + bu[rating.user]
+
+                for f1 in range(self.nFeatures): #f+1):
+                    p += userFeatures[f1, rating.user] * trackFeatures[f1, rating.track]
+                #p = <int>shortPredict(self, rating.user, rating.track, f,
+                #        rating.cache, True)
+                err = float(rating.rating) - p
+                sq += err**2.
+                #ftime = time.time()
+                for f in range(self.rank, self.nFeatures, self.nProcs):
+                    tmp_bi = bi[rating.track]
+                    tmp_bu = bu[rating.user]
                     uf = userFeatures[f, rating.user]
                     tf = trackFeatures[f, rating.track]
+            
+                    
+                    bi[rating.track] = GAMMA * ( err - LAMBDA*tmp_bi )
+                    bu[rating.user] = GAMMA * ( err - LAMBDA*tmp_bu )
+                    userFeatures[f, rating.user]  = uf + GAMMA*(err*tf - LAMBDA * uf)
+                    trackFeatures[f, rating.track] = tf + GAMMA*(err*uf - LAMBDA * tf)
+                #ftotime += (time.time() - ftime)
+            stop = time.time()
+            if self.nProcs == 1 or (self.nProcs - 1) == self.rank or True:
+                print "  epoch=%d RMSE=%f time=%f rank=%d" % (e,
+                        (sq/nRatings)**.5, stop-start, self.rank) #, ftotime)
+        if self.nProcs > 1:
+            self.proc.barrier()
 
-                    userFeatures[f, rating.user]  = uf + .001*(err*tf - .015 * uf)
-                    trackFeatures[f, rating.track] = tf + .001*(err*uf - .015 * tf)
-                stop = time.time()
-                print "  epoch=%d RMSE=%f time=%f" % (e, (sq/nRatings)**.5,
-                        stop-start)
+        if self.rank == 0:
+            print "Full time %g" % (time.time()-fullstart)
+            #if self.nProcs > 1:
+            #    self.proc.barrier()
 
-            if self.nProcs > 1:
-                self.proc.barrier()
+            #for r in range(self.rank, nRatings, self.nProcs):
+            #    rating = ratings[r]
+            #    ratings[r].cache = <int>shortPredict(self, rating.user, rating.track, f,
+            #                rating.cache, False)
 
-            for r in range(self.rank, nRatings, self.nProcs):
-                rating = ratings[r]
-                ratings[r].cache = <int>shortPredict(self, rating.user, rating.track, f,
-                            rating.cache, False)
+        #for f in range(self.nFeatures):
+        #    print "%d, %f, %f" %( f, np.mean(userFeatures[f]),np.mean(trackFeatures[f]))
+        return
+
+
+    def predict(self, user, item):
+        sum = self.mu + self.bi[item] + self.bu[user]
+        for f in range(self.nFeatures):
+            sum += self.userFeatures[f, user] * self.trackFeatures[f, item]
+        if sum > 100:
+            sum = 100
+        if sum < 0:
+            sum = 0
+        return sum
+
+    def validate(self):
+        file = open(os.path.join(self.dir, "validationIdx1.txt"))
+        sq = 0.
+        total = 0
+        for line in file:
+             user, num = [int(x) for x in line.strip().split("|")]
+             for  i in range(num):
+                line = file.next().strip()
+                item, score, day, tm = line.split("\t")
+                score = int(score)
+                item = int(item)
+                if item not in self.tmap:
+                    continue
+                if user not  in self.umap:
+                    continue
+                uid = self.umap[user]
+                item = self.tmap[item]
+                pred = self.predict(uid, item)
+                err = pred -score
+                print pred,score
+                sq += err**2.
+                total += 1
+        print "RMSE=%g\n" % (sq/total)**.5
 
 @cython.boundscheck(False)
 cdef inline float shortPredict(self, int user, int track, int f, int cache, bint trailing):
@@ -271,41 +396,4 @@ cdef inline float shortPredict(self, int user, int track, int f, int cache, bint
         if sum > 100:
             sum  = 100
     return sum
-
-#def main(args):
-#    import  optparse
-#    parser = optparse.OptionParser()
-#    parser.usage = __doc__
-#    parser.add_option("-q", "--quiet",
-#                      action="store_false", dest="verbose", default=True,
-#                      help="don't print status messages to stdout")
-#    parser.add_option("-l", "--load",
-#                      action="store_true", dest="load",
-#                      help="load from a cache file")
-#    parser.add_option("-f", "--features",
-#                      action="store", type=int, dest="nFeatures", default=10,
-#                      help="user nfeatures")
-#    parser.add_option("-e", "--epochs",
-#                      action="store", type=int, dest="nepochs", default=10,
-#                      help="train through nepochs")
-#
-#    (options, args) = parser.parse_args()
-#    if len(args) < 1:
-#        parser.error("Not enough arguments given")
-#    if options.load:
-#        svd = SVD.load(args[0], options.nFeatures)
-#    else:
-#        svd = SVD(args[0], options.nFeatures)
-#        svd.dump("cache")
-#
-#    svd.train_all(options.nepochs)
-#
-#    return 0
-#
-#
-#
-#if __name__ == "__main__":
-#    import sys
-#    sys.exit( main( sys.argv ) )
-
-
+                
