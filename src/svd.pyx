@@ -153,8 +153,8 @@ class SVD(object):
         cdef float ntrack
         cdef float  sumtrack
         for i in range(self.nTracks):
-            ntrack = float(tracks[i].count)
-            sumtrack  = float(tracks[i].sum)
+            ntrack = <float>tracks[i].count
+            sumtrack  = <float>tracks[i].sum
             tracks[i].avg = 0
             if n > 0:
                 tracks[i].avg  = sumtrack / n
@@ -194,14 +194,14 @@ class SVD(object):
 
         for f in range(nFeatures):
             for i in range(nUsers):
-                userFeatures[f, i]  = (random.random()*INIT *2) - INIT
+                userFeatures[f, i]  = (random.random()*INIT *3) - 2*INIT
             for i in range(nTracks): 
-                trackFeatures[f, i] = (random.random()*INIT *2) - INIT
+                trackFeatures[f, i] = (random.random()*INIT *3) - 2*INIT
         for i in range(nUsers):
             bu[i] = ( users[i].sum + self.mu*25) / (25 + users[i].count)
 
         for i in range(nTracks):
-            bi[i] = ( tracks[i].sum + self.mu*25) / (25 + tracks[i].count)
+            bi[i] = ( tracks[i].sum - self.mu*tracks[i].count) / (25 + tracks[i].count)
         self.bu = bu
         self.bi = bi
         self.userFeatures = userFeatures
