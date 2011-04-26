@@ -175,6 +175,7 @@ class SVD(object):
         self.nFeatures = nFeatures
         cdef unsigned int nUsers = self.nUsers
         cdef unsigned int nTracks = self.nTracks
+        cdef float mu = self.mu
         cdef np.ndarray[user_s, ndim=1] users = self.users
         cdef np.ndarray[track_s, ndim=1] tracks = self.tracks
 
@@ -183,6 +184,14 @@ class SVD(object):
                 shape=(nFeatures, nUsers), dtype=np.float, mode='w+')
         cdef np.ndarray[np.float_t, ndim=2] trackFeatures = np.memmap(
                 os.path.join(self.dir, "trackFeatures.mmap"),
+                shape=(nFeatures, nTracks), dtype=np.float, mode='w+')
+
+        cdef np.ndarray[np.float_t, ndim=2] x = np.memmap(
+                os.path.join(self.dir, "x.mmap"),
+                shape=(nFeatures, nTracks), dtype=np.float, mode='w+')
+
+        cdef np.ndarray[np.float_t, ndim=2] y = np.memmap(
+                os.path.join(self.dir, "y.mmap"),
                 shape=(nFeatures, nTracks), dtype=np.float, mode='w+')
 
         cdef np.ndarray[np.float_t, ndim=1] bu = np.memmap(
@@ -197,11 +206,15 @@ class SVD(object):
                 userFeatures[f, i]  = (random.random()*INIT *2) - INIT
             for i in range(nTracks): 
                 trackFeatures[f, i] = (random.random()*INIT *2) - INIT
-        for i in range(nUsers):
-            bu[i] = ( users[i].sum + self.mu*25) / (25 + users[i].count)
-
+                x[f, i] = (random.random()*INIT *2) - INIT
+                y[f, i] = (random.random()*INIT *2) - INIT
         for i in range(nTracks):
-            bi[i] = ( tracks[i].sum + self.mu*25) / (25 + tracks[i].count)
+            bi[i] = <float>(tracks[i].sum - mu*tracks[i].count) /<float>( 25 + tracks[i].count)
+        for i in range(nUsers):
+            bu[i] = 0
+        for i in range(nUsers):
+            bu[i] = 0 #(random.random()*INIT *2) - INIT
+
         self.bu = bu
         self.bi = bi
         self.userFeatures = userFeatures
@@ -253,7 +266,12 @@ class SVD(object):
         self.bi = np.memmap(
                 os.path.join(self.dir, "itemBline.mmap"),
                 shape=(self.nTracks), dtype=np.float, mode='r+')
-
+        self.x = np.memmap(
+                os.path.join(self.dir, "x.mmap"),
+                shape=(self.nFeatures, self.nTracks), dtype=np.float, mode='r+')
+        self.y = np.memmap(
+                os.path.join(self.dir, "y.mmap"),
+                shape=(self.nFeatures, self.nTracks), dtype=np.float, mode='r+')
     @classmethod
     def load(cls, dir, rank=0, nproc=1):
         pklfile = os.path.join(dir, "cache")
@@ -273,15 +291,22 @@ class SVD(object):
     def train_all(self, nepochs = 10):
         cdef int lastUser = -1
         cdef np.ndarray[rating_s, ndim=1] ratings = self.ratings
-        cdef unsigned int f,e,r, nRatings = self.nRatings
-        cdef np.float_t p, sq, err, uf ,tf, tmp_bi, tmp_bu
-        cdef np.float_t mu = self.mu, ru
-        cdef np.ndarray[np.float_t, ndim=2] userFeatures = self.userFeatures
-        cdef np.ndarray[np.float_t, ndim=2] trackFeatures = self.trackFeatures
+        cdef unsigned int f,e,r, nRatings = self.nRatings, k,j, i, u,t
+        cdef np.float_t pred, sq, err, uf ,tf, tmp_bi, tmp_bu
+        cdef np.float_t mu = self.mu, ru, buj, tmpp, tmpq
+        cdef np.ndarray[user_s, ndim=1] users = self.users
+        cdef np.ndarray[np.float_t, ndim=2] p = self.userFeatures
+        cdef np.ndarray[np.float_t, ndim=2] q = self.trackFeatures
+        cdef np.ndarray[np.float_t, ndim=2] x = self.x
+        cdef np.ndarray[np.float_t, ndim=2] y = self.y
         cdef np.ndarray[np.float_t, ndim=1] bu = self.bu
         cdef np.ndarray[np.float_t, ndim=1] bi = self.bi
         cdef rating_s rating
+        cdef user_s user
         cdef unsigned int f1
+        cdef float tmpr 
+    
+        cdef np.ndarray[np.float_t, ndim=1] sum = np.ndarray(self.nFeatures, dtype=np.float)
 
         fullstart = time.time()
         for e in range(nepochs):
@@ -290,29 +315,53 @@ class SVD(object):
             start = time.time()
             sq = 0.
             ftotime = 0
-            lastUser = -1
-            for r in range(nRatings):
-                rating = ratings[r]
-                p = mu + bi[rating.track] + bu[rating.user]
+            r = 0
+            for u in range(self.nUsers):
+                user = users[u]
+                ru = 1. / (<float>user.count)**.5
+                buj = mu + bu[u]
+                for f in range(self.nFeatures):
+                    p[f,u] =  0
+                    for j in range(user.count):
+                        rating = ratings[r+j]
+                        t = rating.track
+                        p[f,u] += (<float>rating.rating - (buj + bi[t]))*x[f,t] + y[f,t]
+                    p[f,u] *= ru
+                    print u, t, user.count, p[f,u], x[f,t], y[f,t], buj
 
-                for f1 in range(self.nFeatures): #f+1):
-                    p += userFeatures[f1, rating.user] * trackFeatures[f1, rating.track]
-                #p = <int>shortPredict(self, rating.user, rating.track, f,
-                #        rating.cache, True)
-                err = float(rating.rating) - p
-                sq += err**2.
-                #ftime = time.time()
-                for f in range(self.rank, self.nFeatures, self.nProcs):
-                    tmp_bi = bi[rating.track]
-                    tmp_bu = bu[rating.user]
-                    uf = userFeatures[f, rating.user]
-                    tf = trackFeatures[f, rating.track]
-            
-                    
-                    bi[rating.track] = GAMMA * ( err - LAMBDA*tmp_bi )
-                    bu[rating.user] = GAMMA * ( err - LAMBDA*tmp_bu )
-                    userFeatures[f, rating.user]  = uf + GAMMA*(err*tf - LAMBDA * uf)
-                    trackFeatures[f, rating.track] = tf + GAMMA*(err*uf - LAMBDA * tf)
+                for f in range(self.nFeatures):
+                    sum[f] = 0
+
+                for i in range(user.count):
+                    rating = ratings[r+i]
+                    t = rating.track
+                    pred = mu + bi[t] + bu[u]
+                    for f1 in range(self.nFeatures):
+                        pred += p[f1, u] * q[f1, t]
+                    err =  <float>rating.rating - pred
+                    sq += err**2.
+                    for f in range(self.nFeatures):
+                        sum[f] += err*q[f, t]
+
+                        tmpp = p[f, u]
+                        tmpq = q[f, t]
+                        q[f, t] = tmpq + GAMMA * ( err *tmpp - LAMBDA*tmpq)
+
+                    tmp_bi = bi[t]
+                    tmp_bu = bu[u]
+                    bi[t] = tmp_bi + GAMMA * ( err - LAMBDA*tmp_bi )
+                    bu[u] = tmp_bu + GAMMA * ( err - LAMBDA*tmp_bu )
+
+                for i in range(user.count):
+                    rating = ratings[r+i]
+                    t = rating.track
+                    tmpr =  rating.rating
+                    for f in range(self.nFeatures):
+                        print GAMMA*(ru*(tmpr - (buj + bi[t]))*sum[f] - LAMBDA * x[f,t]), bi[t]
+                        print GAMMA*(ru *sum[f] - LAMBDA * y[f,t])
+                        x[f,t] = x[f,t] + GAMMA*(ru*(tmpr - (buj + bi[t]))*sum[f] - LAMBDA * x[f,t])
+                        y[f,t] = y[f,t] + GAMMA*(ru *sum[f] - LAMBDA * y[f,t])
+                r +=  user.count
                 #ftotime += (time.time() - ftime)
             stop = time.time()
             if self.nProcs == 1 or (self.nProcs - 1) == self.rank or True:
