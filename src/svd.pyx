@@ -18,34 +18,31 @@ import time
 import multiprocessing as mp
 import random
 
-user_t   = [('id', np.uint), ('count', np.uint), ('sum', np.uint)]
-track_t  = [('id', np.uint), ('count', np.uint ), ('sum', np.uint ), 
-            ('avg', np.float ), ('pavg', np.float)]
-rating_t = [('user', np.uint32), ('track', np.uint32), ('rating', np.uint8),
+user_t   = [('id', np.uint), ('count', np.uint32), ('sum', np.float32)]
+track_t  = [('id', np.uint), ('count', np.uint32 ), ('sum', np.float32 )]
+rating_t = [('user', np.uint32), ('track', np.uint32), ('rating', np.float32),
         ('cache', np.float32)]
 
 cdef packed struct user_s:
     np.uint_t id
-    np.uint_t count
-    np.uint_t sum
+    np.uint32_t count
+    np.float32_t sum
 
 cdef packed struct track_s:
     np.uint_t id
-    np.uint_t count
-    np.uint_t sum
-    np.float_t avg
-    np.float_t pavg
+    np.uint32_t count
+    np.float32_t sum
 
 cdef packed struct rating_s:
     np.uint32_t user
     np.uint32_t track
-    np.uint8_t rating
+    np.float32_t rating
     np.float32_t cache
 
 cdef np.float_t INIT = 0.1 
-cdef np.float_t GAMMA = .002 / 100 #.010 
-cdef np.float_t GAMMA2 = .0001 / 100 #1e-5 #.002 
-cdef np.float_t LAMBDA = .04 * 2
+cdef np.float_t GAMMA = .002 *5 #/ 100 #.010 
+cdef np.float_t GAMMA2 = .001*5 #/ 100 #1e-5 #.002 
+cdef np.float_t LAMBDA = .04 
 
 class SVD(object):
     def __init__(self, dir, nFeatures = 10, rank = 0, nproc = 1):
@@ -117,18 +114,18 @@ class SVD(object):
         uidx = 0
         ridx = 0
         self.mu = 0.
-        cdef int a
+        cdef np.float32_t a
+        cdef np.float32_t score
         for line in trainFile:
             u, n = [ int(x) for x in line.split("|")  ]
             a = 0
             for i in range(n):
                 line = trainFile.next()
-                sid, score, day, tm = line.strip().split("\t")
+                sid, stmp, day, tm = line.strip().split("\t")
                 id = int(sid)
-                score =  int(score)
-                #score =  int(score/ 20.)
+                score =  float(stmp)
+                score /= 100
                 if id not in self.tmap:
-                    print ">"
                     n -= 1
                     continue
                 a += score
@@ -136,7 +133,7 @@ class SVD(object):
                 ratings[ridx].user = uidx
                 ratings[ridx].track = id
                 ratings[ridx].rating = score
-                tracks[id].count += 1
+                tracks[id].count += 1.
                 tracks[id].sum += score
                 ridx += 1
             if n == 0:
@@ -152,17 +149,7 @@ class SVD(object):
         self.nRatings = ridx
         self.nUsers = uidx
         self.mu /= ridx
-        print "mu = %g\n" % self.mu
-        cdef float ntrack
-        cdef float  sumtrack
-        for i in range(self.nTracks):
-            ntrack = float(tracks[i].count)
-            sumtrack  = float(tracks[i].sum)
-            tracks[i].avg = 0
-            if n > 0:
-                tracks[i].avg  = sumtrack / n
-            tracks[i].pavg = ( float( 50*25 + sumtrack) / (25 + sumtrack))
-            
+        #print "mu = %g\n" % self.mu
         self.initModel(nFeatures)
 
     def initData(self):
@@ -212,9 +199,9 @@ class SVD(object):
             bu[i] = 0 #<float>user.sum / <float>user.count - mu
         for f in range(nFeatures):
             for i in range(nTracks): 
-                q[f, i] = .01 / (self.nFeatures)**.5 * (random.random()-.5)#(random.random()*I*3)-2*I
-                x[f, i] = .01 / (self.nFeatures)**.5 * (random.random() -.5) 
-                y[f, i] = .01 / (self.nFeatures)**.5 * (random.random() -.5)
+                q[f, i] = .1 / (self.nFeatures)**.5 * (random.random()-.5)#(random.random()*I*3)-2*I
+                x[f, i] = .1 / (self.nFeatures)**.5 * (random.random() -.5) 
+                y[f, i] = .1 / (self.nFeatures)**.5 * (random.random() -.5)
                 #x[f, i] = random.random()*.02 - .01
                 #y[f, i] = random.random()*.02 - .01 #I*3) - 2*I
         for i in range(nTracks):
@@ -290,7 +277,7 @@ class SVD(object):
         self.users = np.memmap(os.path.join(self.dir, "user.mmap"),
                 dtype=user_t, mode='r')
         self.ratings = np.memmap(os.path.join(self.dir, "rating.mmap"),
-                dtype=rating_t, mode='r+')
+                dtype=rating_t, mode='r')
         self.tracks = np.memmap(os.path.join(self.dir, "track.mmap"),
                 dtype=track_t, mode='r')
     
@@ -384,7 +371,7 @@ class SVD(object):
                     #    pred = 0
                     err =  <np.float_t>rating.rating - pred
                     #print err
-                    sq += err**2.
+                    sq += (err*100)**2.
                     #err /= 100
 
                     for f in range(self.nFeatures):
@@ -448,11 +435,11 @@ class SVD(object):
         for f in range(self.nFeatures):
             sum += self.p[f, user] * self.q[f, item]
         #sum  = (sum - 1.5)*25
-        if sum > 100:
-            sum = 100
+        if sum > 1:
+            sum = 1
         if sum < 0:
             sum = 0
-        return sum
+        return sum*100
 
     def validate(self):
         file = open(os.path.join(self.dir, "validationIdx1.txt"))
@@ -463,7 +450,7 @@ class SVD(object):
              for  i in range(num):
                 line = file.next().strip()
                 item, score, day, tm = line.split("\t")
-                score = int(score) # / 25 + 1.5 )
+                score = float(score)
                 item = int(item)
                 if item not in self.tmap:
                     continue
@@ -477,6 +464,16 @@ class SVD(object):
                 total += 1
         #print "RMSE=%g\n" % (sq/total)**.5
         return (sq/total)**.5
+
+    #def modelStats(self):
+    #    f = open("model.txt", "w")
+    #    for f in range(self.nFeatures):
+    #        f.write("Features %d" % f)
+    #        f.write("q: %g to %g  mean=%g\n" %( np.min(q[f]), np.max(q[f]), np.mean(q[f])))
+    #        f.write("p: %g to %g  mean=%g\n" %( np.min(p[f]), np.max(p[f]), np.mean(p[f])))
+    #        f.write("x: %g to %g  mean=%g\n" %( np.min(x[f]), np.max(x[f]), np.mean(x[f])))
+    #        f.write("y: %g to %g  mean=%g\n" %( np.min(y[f]), np.max(y[f]), np.mean(y[f])))
+        
 
 @cython.boundscheck(False)
 cdef inline float shortPredict(self, int user, int track, int f, int cache, bint trailing):
