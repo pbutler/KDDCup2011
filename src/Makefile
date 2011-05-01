@@ -1,4 +1,4 @@
-
+#CPPFLAGS=-g
 all: main
 #svd.so
 
