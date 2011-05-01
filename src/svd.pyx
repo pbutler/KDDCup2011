@@ -124,6 +124,7 @@ class SVD(object):
                 sid, stmp, day, tm = line.strip().split("\t")
                 id = int(sid)
                 score =  float(stmp)
+                self.mu += score
                 score /= 100
                 if id not in self.tmap:
                     n -= 1
@@ -142,13 +143,13 @@ class SVD(object):
             self.umap[u] = uidx
             users[uidx].count = n
             users[uidx].sum = a 
-            self.mu += a
+            #self.mu += a
             uidx += 1
         trainFile.close()
 
         self.nRatings = ridx
         self.nUsers = uidx
-        self.mu /= ridx
+        self.mu /= ridx * 100
         #print "mu = %g\n" % self.mu
         self.initModel(nFeatures)
 
@@ -214,15 +215,19 @@ class SVD(object):
             for r in range(nRatings):
                 rating = ratings[r]
                 t = rating.track
+                print t
                 u = rating.user
                 pred =  mu + bu[rating.user] + bi[rating.track]
                 err = (<float>rating.rating - pred)
                 sq  += err**2
+                if t == 1:
+                    print "%g %g %g" %(err, bi[t],  2*GAMMA*(err - 2*LAMBDA*bi[t]))
 
-                bi[t] = bi[t] +  2*GAMMA*(err - 2*LAMBDA*bi[t])
+
+                bi[t] = bi[t] + 2*GAMMA*(err - 2*LAMBDA*bi[t])
                 bu[u] = bu[u] + 2*GAMMA*(err - LAMBDA*bu[u])
             err = (sq / <float>nRatings)**.5
-            print "RMSE of biases = %g" % err
+            print "RMSE of biases = %g %g" % (err, sq)
             if (lasterr - err) < .000001:
                 break
             lasterr = err

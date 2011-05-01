@@ -14,8 +14,9 @@
 #include "barrier.h"
 #include <sys/time.h>
 
-const float GAMMA = .02;
-const float LAMBDA = .04;
+const float GAMMA = .002;
+const float GAMMA2 = .001;
+const float LAMBDA = .02;
 #define NUM_THREADS 1
 using namespace __gnu_cxx;
 using namespace std;
@@ -23,7 +24,9 @@ using namespace std;
 #define SCORENORM  100
 
 int maxepochs = 10;
-#ifdef TEST
+#define TEST 1
+//#undef TEST
+#ifndef TEST
 unsigned int nUsers = 1000990;
 unsigned int nItems = 624691;
 unsigned int nRatings = 252800275;
@@ -37,14 +40,13 @@ unsigned int nRatings = 11696;
 #define TFILE  "../testdata/trainIdx1.txt"
 #endif
 
-const unsigned int nFeatures = 1;
+const unsigned int nFeatures = 50;
 
 struct rating_s {
 	uint32_t user;
 	uint32_t item;
 	float rating;
 	float cache;
-
 };
 
 struct item_s {
@@ -56,6 +58,7 @@ struct item_s {
 struct user_s {
 	uint32_t id;
 	uint32_t count;
+	uint32_t nu;
 	float sum;
 };
 
@@ -145,10 +148,10 @@ void load_model()
 	items = (struct item_s*)open_rw("tmp/items.mmap", sizeof(item_s)*nItems);
 	users = (struct user_s*)open_rw("tmp/users.mmap", sizeof(user_s)*nUsers);
 
-	p = (float *)open_rw("tmp/p.mmap", sizeof(user_s)*nFeatures*nUsers);
-	q = (float*)open_rw("tmp/q.mmap", sizeof(user_s)*nFeatures*nItems);
-	x = (float*)open_rw("tmp/x.mmap", sizeof(user_s)*nFeatures*nItems);
-	y = (float*)open_rw("tmp/y.mmap", sizeof(user_s)*nFeatures*nItems);
+	p = (float *)open_rw("tmp/p.mmap", sizeof(float)*nFeatures*nUsers);
+	q = (float*)open_rw("tmp/q.mmap", sizeof(float)*nFeatures*nItems);
+	x = (float*)open_rw("tmp/x.mmap", sizeof(float)*nFeatures*nItems);
+	y = (float*)open_rw("tmp/y.mmap", sizeof(float)*nFeatures*nItems);
 }
 
 void *init_model(void *ptr = NULL) {
@@ -163,18 +166,17 @@ void *init_model(void *ptr = NULL) {
 	for(int i = rank; i < nItems; i+=NUM_THREADS) {
 	       bi[i] = 0;
 	}
-	float sq, err=1e6, pred, lasterr = 1e6+1;
+	double sq, err=1e6, pred, lasterr = 1e6+1;
 	while (lasterr - err > 1e-6) {
 		double start = get_time();
 		lasterr = err;
 		sq = 0;
-		for(int r = rank; r < nRatings; r+= NUM_THREADS) {
+		for(int r = rank; r < nRatings; r+=NUM_THREADS) {
 			pred = mu + bu[ratings[r].user] + bi[ratings[r].item];
 			err = ratings[r].rating - pred;
 			sq += err*err*SCORENORM*SCORENORM;
-
-			bu[ratings[r].user] += GAMMA*(err - LAMBDA*bu[ratings[r].user]);
-			bi[ratings[r].item] += GAMMA*(err - LAMBDA*bi[ratings[r].item]);
+			bu[ratings[r].user] += 2*GAMMA*(err - LAMBDA*bu[ratings[r].user]);
+			bi[ratings[r].item] += 2*GAMMA*(err - 2*LAMBDA*bi[ratings[r].item]);
 		}
 		terrs[rank] = sq;
 		pthread_barrier_wait(&barrier);
@@ -183,9 +185,9 @@ void *init_model(void *ptr = NULL) {
 			sq += terrs[i];
 		}
 		err = sqrt(sq / nRatings);
-		//if (rank == 0 ) {
-			printf("BIAS RMSE=%g time=%g\n", err, get_time()-start);
-		//}
+		if (rank == 0 ) {
+			printf("BIAS RMSE=%g time=%g %g\n", err, get_time()-start, sq);
+		}
 	}
 	float sum = 0;
 	for(int r = rank; r < nRatings; r+=NUM_THREADS) {
@@ -193,22 +195,41 @@ void *init_model(void *ptr = NULL) {
 		sum += ratings[r].cache;
 	}
 	printf("Average normalized = %g\n", sum / (float)nRatings);
-	for(int i = rank; i < nUsers*nFeatures;i+=NUM_THREADS) {
-		p[i] =  randF(-1,1);//-.003, .001);
-	}
+	/*for(int i = rank; i < nUsers*nFeatures;i+=NUM_THREADS) {
+		p[i] =  randF(-.003, .001);
+	}*/
 	for(int i = rank; i < nItems*nFeatures;i+=NUM_THREADS) {
-		q[i] = randF(-1,1); //.003, .001);
-		x[i] = randF(-.01, .01);
-		y[i] = randF(-.01, .01);
+		q[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
+		x[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
+		y[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
 	}
+	return 0;
 }
 
-float predict(int uid, int iid)
+float predict(int uidx, int iidx)
 {
-	float sum = mu + bu[uid] +bi[iid];
-	for(int f = 0; f < nFeatures; f++) {
-		sum += q[iid*nFeatures+f] * p[uid*nFeatures+f];
+	int uid, iid;
+	float sum = mu;
+	bool done = false;
+	if (imap.count(iidx) == 0) {
+		done = true;
+	} else {
+		iid = imap[iidx];
+		sum += bi[iid];
 	}
+	if (umap.count(uidx) == 0) {
+		done = true;
+	} else {
+		uid = umap[uidx];
+		sum += bu[uid];
+	}
+
+	if (!done) {
+		for(int f = 0; f < nFeatures; f++) {
+			sum += q[iid*nFeatures+f] * p[uid*nFeatures+f];
+		}
+	}
+
 	if (sum > 100/SCORENORM) sum = 100 /SCORENORM ;
 	if (sum < 0) sum = 0;
 	//printf("* %g %g \n", mu + bu[uid] + bi[iid], sum);
@@ -233,9 +254,10 @@ float validate(bool print = false)
 			break;
 		}
 		//printf("' %c\n", data[didx-1]);
-		uidx = umap[uid];
+		//uidx = umap[uid];
 		parseInt(data, &didx, &n, size);
-		for(i =0; i < n; i++) {
+		users[uidx].nu = users[uidx].count + n;
+		for(i = 0; i < n; i++) {
 			parseInt(data, &didx, &iid, size);
 			parseInt(data, &didx, &stmp, size);
 			parseInt(data, &didx, &day, size);
@@ -244,9 +266,10 @@ float validate(bool print = false)
 			parseInt(data, &didx, &sec, size);
 			score = (float) stmp;
 			score = score / SCORENORM;
-			iidx = imap[iid];
+
+			//iidx = imap[iid];
 			count ++;
-			float pred = predict(uidx, iidx);
+			float pred = predict(uid, iid);
 			err = score - pred;
 			if(print)
 				printf("%g %g %g\n", score, pred, err);
@@ -270,67 +293,72 @@ void *train_model(void *ptr = NULL) {
 		sq = 0;
 		double start = get_time();
 
-	//	pthread_barrier_wait(&barrier);
-		for(int r = 0; r < nRatings; r++ ) {
-			struct rating_s rating = ratings[r];
-			float pred = mu + bi[rating.item] + bu[rating.user];
-			for(int f1 = 0; f1 < nFeatures; f1++) {
-				pred += p[rating.user*nFeatures + f1]*q[rating.item*nFeatures+f1];
-			}
-			err = rating.rating - pred;
-			sq += err*err*SCORENORM*SCORENORM;
+		int ridx = 0;
+		for(int uidx = 0; uidx < nUsers; uidx++) {
+			struct user_s user = users[uidx];
+			float invsqru = sqrt( 1. / (float)user.count);
+			float invsqnu = sqrt( 1. / (float)user.nu);
+			int uf =  user.id*nFeatures;
 
+			for(int f = 0; f < nFeatures; f++) {
+				p[uf + f] = 0;
 
-			for(int f = rank; f < nFeatures; f+=NUM_THREADS) {
-				float tmpq = q[rating.item*nFeatures+f];
-				float tmpp = p[rating.user*nFeatures+f];
-
-				q[rating.item*nFeatures+f] += GAMMA*(err*tmpp - LAMBDA*tmpq);
-				//p[rating.user*nFeatures+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
-			}
-			bu[rating.user] += GAMMA*(err - LAMBDA*bu[rating.user]);
-			bi[rating.item] += GAMMA*(err - LAMBDA*bi[rating.item]);
-		}
-			/*int ridx = 0;
-			for(int uidx = 0; uidx < nUsers; uidx ++) { //+=NUM_THREADS)
-				struct user_s user = users[uidx];
 				for(int r = 0; r < user.count; r++) {
-					struct rating_s rating = ratings[ridx + r];
-					float pred = 0; //mu + bi[rating.item] + bu[rating.user];
-					for(int f1 = 0; f1 < f; f1++) {
-						pred += p[rating.user*nFeatures + f1]*q[rating.item*nFeatures+f1];
-					}
-					//printf("%g\n",  pred);
-					err = rating.rating - pred;
-					sq += pow(err,2);
+					float rb = ratings[ridx+r].rating;
+					rb -= mu;
+					rb -= bu[ratings[ridx+r].user];
+					rb -= bi[ratings[ridx+r].item];
+					int j = (ratings[ridx+r].item*nFeatures);
+					p[uf+f] += rb * x[j+f] * invsqru;
+					p[uf+f] += y[j+f] * invsqnu;
+				}
+				sum[f] = 0.;
+			}
+			//pthread_barrier_wait(&barrier);
+			for(int r = 0; r < user.count; r++ ) {
+				struct rating_s rating = ratings[ridx + r];
+				float pred = mu + bi[rating.item] + bu[rating.user];
+				//printf("%d %d %g %g <\n", rating.user, rating.item, bi[rating.item], bu[rating.user]  );
+				for(int f1 = 0; f1 < nFeatures; f1++) {
+					pred += p[rating.user*nFeatures + f1]*q[rating.item*nFeatures+f1];
+				}
+				err = rating.rating - pred;
+				//printf("%g %g<>\n", rating.rating, pred) ;
+				sq += err*err*SCORENORM*SCORENORM;
 
-					//for(int f = 0; f < nFeatures; f++) {
+				for(int f = 0; f < nFeatures; f++) {
+
 					float tmpq = q[rating.item*nFeatures+f];
 					float tmpp = p[rating.user*nFeatures+f];
 
-					//sum[f] += err*tmpq;
+					sum[f] += err*tmpq;
 
 					q[rating.item*nFeatures+f] += GAMMA*(err*tmpp - LAMBDA*tmpq);
-					p[rating.user*nFeatures+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
-					//}
+					//p[rating.user*nFeatures+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
 				}
+				//printf("%g %g\n", err , - LAMBDA*bu[rating.user]);
+				bu[rating.user] += GAMMA*(err - LAMBDA*bu[rating.user]);
+				bi[rating.item] += GAMMA*(err - LAMBDA*bi[rating.item]);
+			}
 
-				for(int r = 0; r < user.count; r++) {
-				  struct rating_s rating = ratings[ridx + r];
-				  float rb = rating.cache;
-				  for(int f = 0; f < nFeatures; f++) {
-				  int i = rating.item + f;
-				  x[i] += GAMMA*(invsqru*rb*sum[f] - LAMBDA*x[i]);
-				  y[i] += GAMMA*(invsqru*sum[f] - LAMBDA*y[i]);
-				  }
-				  }
-				ridx += user.count;
-			}*/
+
+			for(int r = 0; r < user.count; r++) {
+				struct rating_s rating = ratings[ridx + r];
+				float rb = rating.rating - mu -bu[rating.user] -bi[rating.item];
+				for(int f = 0; f < nFeatures; f++) {
+					int i = rating.item*nFeatures + f;
+					x[i] += GAMMA2*(invsqru*rb*sum[f] - LAMBDA*x[i]);
+					y[i] += GAMMA2*(invsqnu*sum[f] - LAMBDA*y[i]);
+				}
+			}
+			ridx += user.count;
+		}
 		//pthread_barrier_wait(&barrier);
-			err = sqrt(sq / nRatings);
-			printf("epoch=%d RMSE=%g VMRSE=%g" , epoch++, err, validate());
-			printf(" time=%g rank=%d\n", start-get_time(), rank);
+		err = sqrt(sq / nRatings);
+		printf("epoch=%d RMSE=%g VMRSE=%g" , epoch++, err, validate());
+		printf(" time=%g rank=%d\n", start-get_time(), rank);
 	}
+	return 0;
 }
 
 void kickoff(void *(*foo)(void*))
@@ -393,6 +421,7 @@ void read_data()
 			uidx = imap[uid];
 		}
 		parseInt(data, &didx, &n, size);
+		user[uidx].nu = n;
 		for(int i =0; i < n; i++) {
 			parseInt(data, &didx, &iid, size);
 			parseInt(data, &didx, &stmp, size);
@@ -401,6 +430,7 @@ void read_data()
 			parseInt(data, &didx, &min, size);
 			parseInt(data, &didx, &sec, size);
 			score = (float) stmp;
+			mu += score;
 			score /= SCORENORM;
 			//printf("%f\n", score);
 			if( imap.count(iid) == 0) {
@@ -421,7 +451,6 @@ void read_data()
 			ratings[ridx].item = iidx;
 			ratings[ridx].user = uidx;
 			ratings[ridx].rating = score;
-			mu += score;
 			ridx++;
 		}
 	}
@@ -430,10 +459,11 @@ void read_data()
 	nUsers = umaplen;
 	nRatings = ridx;
 	printf("nRatings = %d\n", nRatings);
-	mu /= (float)ridx;
+	//printf("mu=%g", mu);
+	mu /= (float)ridx * SCORENORM;
 
 	FILE *tmp = fopen("tmp/values", "w");
-	fprintf(tmp, "%u %u %u\n", nRatings, nUsers, nItems);
+	fprintf(tmp, "%u %u %u %25.18g\n", nRatings, nUsers, nItems, mu);
 	for(int i = 0 ; i < nUsers; i++ ) {
 		fprintf(tmp, "%d\n", users[i].id);
 	}
@@ -449,20 +479,33 @@ void print_model_stats()
 	printf("--------------\n");
 	printf("Stats\n");
 	printf("--------------\n");
-	printf("%g %g %g %g\n", p[0], q[0], x[0], y[0]);
-	printf("%g %g %g %g\n", p[1], q[1], x[1], y[1]);
+	for(int i = 0; i < nFeatures; i++) {
+		printf("%g %g %g %g\n", p[i], q[i], x[i], y[i]);
+	}
+	printf("MEAN(global) = %g\n", mu);
+	float a = 0;
+	for(int i = 0; i < nUsers; i++) {
+		a += bu[i];
+	}
+	printf("MEAN(bu) = %g\n", a/(float)nUsers);
+	float b = 0;
+	for(int i = 0; i < nItems; i++) {
+		b += bi[i];
+	}
+	printf("MEAN(bi) = %g\n", b/(float)nItems);
 	printf("--------------\n");
 }
 
 int main (int argc, char **argv)
 {
-	srandom(time(NULL));
+	//srandom(time(NULL));
 	int c;
 	bool isInit = false;
 	bool isTrain = false;
 	bool isVerify = false;
 	bool isBuildModel = false;
-	while ( (c = getopt(argc, argv, "itvme:")) != -1) {
+	bool isStats = false;
+	while ( (c = getopt(argc, argv, "itvme:s")) != -1) {
 		switch (c) {
 			case 'i':
 				isInit = true;
@@ -475,6 +518,9 @@ int main (int argc, char **argv)
 				break;
 			case 'v':
 				isVerify = true;
+				break;
+			case 's':
+				isStats = true;
 				break;
 			case 'e':
 				maxepochs = atoi(optarg);
@@ -494,7 +540,7 @@ int main (int argc, char **argv)
 
 	if(!isInit) {
 		FILE *tmp = fopen("tmp/values", "r");
-		fscanf(tmp, "%u %u %u\n", &nRatings, &nUsers, &nItems);
+		fscanf(tmp, "%u %u %u %g\n", &nRatings, &nUsers, &nItems, &mu);
 		int lk = 0;
 		for(int i = 0 ; i < nUsers; i++ ) {
 			fscanf(tmp, "%d\n", &lk);
@@ -510,6 +556,7 @@ int main (int argc, char **argv)
 
 	if(isInit) {
 		read_data();
+		validate(); //no this really does nothing but fill out nu
 	}
 
 	if (isInit || isBuildModel) {
@@ -522,7 +569,9 @@ int main (int argc, char **argv)
 		kickoff(train_model);
 	}
 
-	print_model_stats();
+	if (isStats) {
+		print_model_stats();
+	}
 
 	if (isVerify) {
 		printf("VRMSE = %g\n", validate(true));
