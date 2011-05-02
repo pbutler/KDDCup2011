@@ -20,17 +20,18 @@ double itemReg					= 1;
 double userStep				= 1.5;
 double userReg					= 1;
 
-double GAMMA = .07; //.005;
-double GAMMA2 = .0001;//.001;
+double GAMMA = .005; //.07;
+double GAMMA2 = .001; // / 10000;//.0001;
 double LAMBDA = 0.05;
+double LAMBDA2 =  GAMMA2*40;
 #define NUM_THREADS 1
 using namespace __gnu_cxx;
 using namespace std;
 
-#define SCORENORM  1
+#define SCORENORM  100
 
 int maxepochs = 10;
-//#define TEST 1
+#define TEST 1
 #undef TEST
 #ifndef TEST
 unsigned int nUsers = 1000990;
@@ -48,25 +49,24 @@ unsigned int nValidations = nUsers*4;
 #define TFILE  "../testdata/trainIdx1.txt"
 #endif
 
-const unsigned int nFeatures = 1;
+const unsigned int nFeatures = 50;
 
 struct rating_s {
-	uint32_t user;
-	int32_t item;
-	double rating;
+	unsigned int user : 20;
+	unsigned int item : 20;
+	float rating;
+	//unsigned int rating : 8;
 };
 
 struct item_s {
 	uint32_t id;
 	uint32_t count;
-	float sum;
 };
 
 struct user_s {
 	uint32_t id;
 	uint32_t count;
 	uint32_t nu;
-	float sum;
 };
 
 
@@ -146,6 +146,7 @@ void *open_rw(char *file, ssize_t size)
 		if ( errno == EINVAL) printf("INVAL\n");
 		return NULL;
 	}
+	madvise(data, size, MADV_SEQUENTIAL);
 	return data;
 }
 
@@ -182,7 +183,7 @@ void *init_model(void *ptr = NULL) {
 		double start = get_time();
 		lasterr = err;
 		sq = 0;
-		for(int r = 0; r < nRatings; r++ ) {
+		for(int r = rank; r < nRatings; r+=NUM_THREADS ) {
 			pred = mu + bu[ratings[r].user] + bi[ratings[r].item];
 			if (pred < 0) pred = 0;
 			if (pred > 100/SCORENORM) pred = 100/SCORENORM;
@@ -218,12 +219,6 @@ void *init_model(void *ptr = NULL) {
 			faults = 0;
 		}
 	}
-	double sum = 0;
-	/*for(int r = rank; r < nRatings; r+=NUM_THREADS) {
-		ratings[r].cache = ratings[r].rating - mu - bi[ratings[r].item] - bu[ratings[r].user];
-		sum += ratings[r].cache;
-	}*/
-	printf("Average normalized = %g\n", sum / (double)nRatings);
 	for(int i = rank; i < nUsers*nFeatures;i+=NUM_THREADS) {
 		p[i] =  0; //randF(-.003, .001);
 		p[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
@@ -301,7 +296,7 @@ void read_validate()
 
 				items[iidx].id = iid;
 				items[iidx].count = 0;
-				items[iidx].sum = 0;
+				//items[iidx].sum = 0;
 				//iidx = -1;
 			} else {
 				iidx = imap[iid];
@@ -347,7 +342,7 @@ void *train_model(void *ptr = NULL) {
 				invsqnu = sqrt( 1. / (double)user.nu);
 			}
 			int uf =  user.id*nFeatures;
-			/*for(int f = 0; f < nFeatures; f++) {
+			for(int f = 0; f < nFeatures; f++) {
 				p[uf + f] = 0;
 
 				for(int r = 0; r < user.count; r++) {
@@ -360,7 +355,7 @@ void *train_model(void *ptr = NULL) {
 					p[uf+f] += y[j+f] * invsqnu;
 				}
 				sum[f] = 0.;
-			}*/
+			}
 			//pthread_barrier_wait(&barrier);
 			for(int r = 0; r < user.count; r++ ) {
 				struct rating_s rating = ratings[ridx+r];
@@ -379,22 +374,22 @@ void *train_model(void *ptr = NULL) {
 					sum[f] += err*tmpq;
 
 					q[rating.item*nFeatures+f] += GAMMA*(err*tmpp - LAMBDA*tmpq);
-					p[rating.user*nFeatures+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
+					//p[rating.user*nFeatures+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
 				}
 				bu[rating.user] += GAMMA*(err - LAMBDA*bu[rating.user]);
 				bi[rating.item] += GAMMA*(err - LAMBDA*bi[rating.item]);
 			}
 
-			/*
+
 			for(int r = 0; r < user.count; r++) {
 				struct rating_s rating = ratings[ridx + r];
 				float rb = rating.rating - mu -bu[rating.user] -bi[rating.item];
 				for(int f = 0; f < nFeatures; f++) {
 					int i = rating.item*nFeatures + f;
-					x[i] += GAMMA2*(invsqru*rb*sum[f] - LAMBDA*x[i]);
-					y[i] += GAMMA2*(invsqnu*sum[f] - LAMBDA*y[i]);
+					x[i] += GAMMA2*(invsqru*rb*sum[f] - LAMBDA2*x[i]);
+					y[i] += GAMMA2*(invsqnu*sum[f] - LAMBDA2*y[i]);
 				}
-			}*/
+			}
 			ridx += user.count;
 		}
 		//pthread_barrier_wait(&barrier);
@@ -469,7 +464,7 @@ void read_data()
 			umap[uid] = uidx;
 			users[uidx].id = uid;
 			users[uidx].count = 0;
-			users[uidx].sum = 0;
+			//users[uidx].sum = 0;
 		} else {
 			uidx = imap[uid];
 		}
@@ -491,14 +486,14 @@ void read_data()
 
 				items[iidx].id = iid;
 				items[iidx].count = 0;
-				items[iidx].sum = 0;
+				//items[iidx].sum = 0;
 			} else {
 				iidx = imap[iid];
 			}
 			users[uidx].count += 1;
-			users[uidx].sum += score;
+			//users[uidx].sum += score;
 			items[iidx].count += 1;
-			items[iidx].sum += score;
+			//items[iidx].sum += score;
 			ratings[ridx].item = iidx;
 			ratings[ridx].user = uidx;
 			ratings[ridx].rating = score;
