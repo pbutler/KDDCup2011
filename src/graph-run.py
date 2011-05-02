@@ -27,7 +27,7 @@ def main(args):
     f = plt.figure()
     a = f.add_subplot(111)
     a.set_xlim(0,100)
-    a.set_ylim(0,70)
+    a.set_ylim(0,.2)
     feature = None
     curl = None
     i = 0
@@ -36,22 +36,19 @@ def main(args):
     plt.show()
     file = sys.stdin #open("test")
     #for line in file: #.readline():
+    curl = a.plot(x,y)[0]
+    x = []
+    y = []
     while True:
         line = sys.stdin.readline()
         sys.stdout.write(line)
         line = line.strip()
-        if line.startswith("Training"):
-            feature = int(line.split()[-1])
-            curl = a.plot([5,4], [3,2])[0]
-            x = []
-            y = []
-            continue
-        elif feature is None:
-            continue
-        elif line == "":
+        if not line.startswith("epoch"):
             continue
 
-        e, r = line.split()
+        cols = line.split()
+        e = cols[0]
+        r = cols[1]
         e = int(e.split("=")[1])
         r = float(r.split("=")[1])
         x += [e]

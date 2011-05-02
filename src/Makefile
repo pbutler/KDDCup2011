@@ -1,5 +1,6 @@
-
-all: svd.so
+#CPPFLAGS=-g
+all: main
+#svd.so
 
 svd.so: svd.pyx
 	python setup.py build_ext -i
