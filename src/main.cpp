@@ -22,9 +22,9 @@ double userStep		= 1.5;
 double userReg		= 1;
 
 double GAMMA = .005; //.07;
-double GAMMA2 = .001/ 1; // / 10000;//.0001;
-double LAMBDA = 0.005;
-double LAMBDA2 =  GAMMA2*40;
+double LAMBDA = 0.05;
+double GAMMA2 = .005 / 100; // / 10000;//.0001;
+double LAMBDA2 =  1;//0005; //100; //GAMMA2*40;
 #define NUM_THREADS 1
 using namespace __gnu_cxx;
 using namespace std;
@@ -45,7 +45,7 @@ unsigned int nTests = 0;
 #define TESTFILE  "testIdx1.txt"
 
 
-const unsigned int nFeatures = 50;
+const unsigned int nFeatures = 10;
 
 struct rating_s {
 	//unsigned int user : 20;
@@ -262,7 +262,7 @@ double validate(bool print = false)
 			double err = (double)validations[ridx].rating/SCORENORM - pred;
 			sq += err*err*SCORENORM*SCORENORM;
 			if (print) {
-				printf("%d %d %d %g %g\n", u, validations[i].item, validations[i].rating, pred*SCORENORM, SCORENORM*err);
+				printf("%d %d %d %g %g\n", u, validations[ridx].item, validations[ridx].rating, pred*SCORENORM, err*SCORENORM);
 			}
 		}
 	}
@@ -742,7 +742,7 @@ int main (int argc, char **argv)
 	}
 
 	if(isPredict) {
-		read_tests();
+		make_predictions();
 	}
 	pthread_barrier_destroy(&barrier);
 	pthread_exit(NULL);
