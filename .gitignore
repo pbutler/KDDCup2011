@@ -5,3 +5,6 @@
 *.so
 cache
 .dbrc
+svd.c
+svd.html
+*.track1.dat
