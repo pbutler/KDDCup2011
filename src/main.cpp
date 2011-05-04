@@ -15,6 +15,7 @@
 #include <sys/time.h>
 
 using namespace std;
+using namespace __gnu_cxx;
 
 double itemStep		= 0.005;
 double itemReg		= 1;
@@ -22,13 +23,12 @@ double userStep		= 1.5;
 double userReg		= 1;
 
 double GAMMA = .005; //.07;
-double LAMBDA = 0.05;
-double GAMMA2 = .005 / 100; // / 10000;//.0001;
-double LAMBDA2 =  1;//0005; //100; //GAMMA2*40;
-#define NUM_THREADS 1
-using namespace __gnu_cxx;
-using namespace std;
+double LAMBDA = 1; //0.05;
+double GAMMA2 = .005 ; // / 10000;//.0001;
+double LAMBDA2 =  .4;//0005; //100; //GAMMA2*40;
 
+
+#define NUM_THREADS 1
 #define SCORENORM  100.f
 
 int maxepochs = 20;
@@ -45,12 +45,13 @@ unsigned int nTests = 0;
 #define TESTFILE  "testIdx1.txt"
 
 
-const unsigned int nFeatures = 10;
+const unsigned int nFeatures = 100;
 
 struct rating_s {
 	//unsigned int user : 20;
 	unsigned int item : 20;
 	unsigned int rating : 8;
+	unsigned int type : 3;
 };
 
 struct item_s {
@@ -230,9 +231,10 @@ void *init_model(void *ptr = NULL) {
 		p[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
 	}
 	for(int i = rank; i < nItems*nFeatures;i+=NUM_THREADS) {
-		q[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
-		x[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
-		y[i] = .01/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
+		const double total = .025, min=-2., max=1.;
+		q[i] = total/sqrt(nFeatures) * (randF(min, max));
+		x[i] = total/sqrt(nFeatures) * (randF(min, max));
+		y[i] = total/sqrt(nFeatures) * (randF(min, max));
 	}
 	return 0;
 }
@@ -382,6 +384,7 @@ void *train_model(void *ptr = NULL) {
 	}
 	double lasterr = 1e6+1, sq = 0, err = 1e6;
 	int epoch = 0, faults = 0;
+	printf("maxf=%d\n", maxfaults);
 	while (faults <  maxfaults && epoch < maxepochs) {
 	//while (epoch < maxepochs) { // && (epochs < 10 || (lasterr - err) > 1e-6))
 		lasterr = err;
@@ -424,13 +427,14 @@ void *train_model(void *ptr = NULL) {
 			for(int r = 0; r < user.count; r++ ) {
 				struct rating_s rating = ratings[ridx+r];
 				double pred = mu + bi[rating.item] + bu[uidx];
-				for(int f1 = 0; f1 < nFeatures; f1++) {
-					pred += p[uf + f1]*q[rating.item*nFeatures+f1];
-				}
-				err = rating.rating / SCORENORM - pred;
-				sq += err*err*SCORENORM*SCORENORM;
-
 				for(int f = 0; f < nFeatures; f++) {
+				//for(int f1 = 0; f1 < nFeatures; f1++) {
+					pred += p[uf + f]*q[rating.item*nFeatures+f];
+				//}
+					err = rating.rating / SCORENORM - pred;
+					if(f == nFeatures - 1)
+						sq += err*err*SCORENORM*SCORENORM;
+
 
 					double tmpq = q[rating.item*nFeatures+f];
 					double tmpp = p[uf + f];
@@ -479,7 +483,7 @@ void *train_model(void *ptr = NULL) {
 			faults++;
 		} else {
 			GAMMA *= .7;
-			GAMMA2 *= .7;
+			//GAMMA2 *= .7;
 			faults = 0;
 		}
 		err= verr;
@@ -626,6 +630,47 @@ void read_stats()
 	fclose(fp);
 }
 
+void read_trackData()
+{
+	hash_multimap<int, int> genreMap;
+	FILE *fp = fopen("trackData1.txt","r");
+	int lines = 0, value;
+	char *cur;
+	char buf[200];
+	int trackid, albumid, artistid;
+	while(! feof(fp) ) {
+		fgets(buf, 200, fp);
+		trackid = atoi(strtok(buf, "|"));
+		cur = strtok(NULL, "|");
+		if (cur[0] == 'N') {
+			albumid = -1;
+		} else {
+			albumid = atoi(cur);
+		}
+		if (cur[0] == 'N') {
+			artistid = -1;
+		} else {
+			artistid = atoi(cur);
+		}
+		while( (cur = strtok(NULL, "|")) != NULL) {
+			genreMap
+		}
+		printf("%s\n", buf);
+		lines++;
+	}
+	printf("%d\n", lines);
+}
+
+void read_genres()
+{
+	FILE *fp = fopen("genreData1.txt","r");
+	int lines = 0, value;
+	while(! feof(fp) ) {
+		fscanf(fp, "%d\n", &value);
+		lines++;
+	}
+}
+
 void print_model_stats()
 {
 	printf("--------------\n");
@@ -658,6 +703,11 @@ int main (int argc, char **argv)
 	bool isBuildModel = false;
 	bool isStats = false;
 	bool isPredict = false;
+
+	//read_genres();
+	read_trackData();
+	return 0;
+
 	while ( (c = getopt(argc, argv, "itvme:spf:bE:")) != -1) {
 		switch (c) {
 			case 'i':
@@ -749,3 +799,4 @@ int main (int argc, char **argv)
 
 	exit (0);
 }
+
