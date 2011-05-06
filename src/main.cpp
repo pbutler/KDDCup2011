@@ -18,19 +18,24 @@
 using namespace std;
 using namespace __gnu_cxx;
 
-double itemStep2	= 0.005;
 double itemStep		= 0.005;
 double itemReg		= 1;
 double userStep		= 1.5;
-double userStep2	= 1.5;
 double userReg		= 1;
 double genreStep	= 0.005;
 double genreReg		= 1;
 
-double GAMMA = .008;
-double LAMBDA = 0.05;
-double GAMMA2 = .0005 ; // / 10000;//.0001;
-double LAMBDA2 =  .01;//0005; //100; //GAMMA2*40;
+double itemStep2	= 0.005;
+double userStep2	= 1.5;
+double pStep		= .008;
+double pReg		= .05;
+double qStep		= .008;
+double qReg		= .05;
+double xStep		= .008;
+double xReg		= .05;
+double yStep		= .008;
+double yReg		= .05;
+
 
 const double decay = .99;
 #define NUM_THREADS 1
@@ -242,7 +247,7 @@ void *init_model(void *ptr = NULL) {
 				}
 
 				pthread_mutex_lock(&mutexB);
-				bi[rating.item] += GAMMA*(err - LAMBDA*tmpbi);
+				bi[rating.item] += itemStep2*(err - itemReg*tmpbi);
 				pthread_mutex_unlock(&mutexB);
 				//printf("%g %g %g\n", err, rating.rating, pred);
 				//printf("%g\n", bi[ratings[r].item]);
@@ -528,8 +533,8 @@ void *train_model(void *ptr = NULL) {
 					double tmpq = q[rating.item*nFeatures+f];
 					double tmpp = p[uf + f];
 					sum[f] += err*tmpq;
-					q[rating.item*nFeatures+f] += GAMMA*(err*tmpp - LAMBDA*tmpq);
-					//p[uf+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
+					q[rating.item*nFeatures+f] += qStep*(err*tmpp - qReg*tmpq);
+					//p[uf+f] += pStep*(err*tmpq - pReg*tmpp);
 				}
 				bu[u] += userStep2*(err - userReg*bu[u]);
 				pthread_mutex_lock(&mutexB);
@@ -544,18 +549,18 @@ void *train_model(void *ptr = NULL) {
 					struct rating_s rating = ratings[r] ;
 					float rb = ratings[r].extra;
 					int i = rating.item*nFeatures + f;
-					x[i] += GAMMA2*(invsqru*rb*sum[f] - LAMBDA2*x[i]);
-					y[i] += GAMMA2*(invsqnu*sum[f] - LAMBDA2*y[i]);
+					x[i] += xStep*(invsqru*rb*sum[f] - xReg*x[i]);
+					y[i] += yStep*(invsqnu*sum[f] - yReg*y[i]);
 				}
 				for(int r = 4*u; r < 4*(u+1); r++) {
 					struct rating_s rating = validations[r];
 					int i = rating.item*nFeatures + f;
-					y[i] += GAMMA2*(invsqnu*sum[f] - LAMBDA2*y[i]);
+					y[i] += yStep*(invsqnu*sum[f] - yReg*y[i]);
 				}
 				for(int r = 6*u; r < 6*(u+1); r++) {
 					struct rating_s rating = tests[r];
 					int i = rating.item*nFeatures + f;
-					y[i] += GAMMA2*(invsqnu*sum[f] - LAMBDA2*y[i]);
+					y[i] += yStep*(invsqnu*sum[f] - yReg*y[i]);
 				}
 				pthread_mutex_unlock(&mutexFeature[f]);
 			}
@@ -572,8 +577,10 @@ void *train_model(void *ptr = NULL) {
 		if (verr > lasterr) {
 			faults++;
 		} else {
-			GAMMA *= decay;
-			GAMMA2 *= decay;
+			qStep *= decay;
+			xStep *= decay;
+			yStep *= decay;
+			pStep *= decay;
 			userStep2 *= decay;
 			itemStep2 *= decay;
 			faults = 0;
