@@ -18,19 +18,21 @@
 using namespace std;
 using namespace __gnu_cxx;
 
+double itemStep2	= 0.005;
 double itemStep		= 0.005;
 double itemReg		= 1;
 double userStep		= 1.5;
+double userStep2	= 1.5;
 double userReg		= 1;
 double genreStep	= 0.005;
 double genreReg		= 1;
 
-double GAMMA = .005; //.07;
+double GAMMA = .008;
 double LAMBDA = 0.05;
-double GAMMA2 = .005 / 100; // / 10000;//.0001;
-double LAMBDA2 =  1;//0005; //100; //GAMMA2*40;
+double GAMMA2 = .0005 ; // / 10000;//.0001;
+double LAMBDA2 =  .01;//0005; //100; //GAMMA2*40;
 
-const double decay = .9;
+const double decay = .99;
 #define NUM_THREADS 1
 #define SCORENORM  100.f
 
@@ -45,7 +47,7 @@ unsigned int nValidations =0 ;
 unsigned int nTests = 0;
 unsigned int nGenres = 0;
 
-const unsigned int nFeatures = 1;
+const unsigned int nFeatures = 10;
 
 pthread_mutex_t mutexB = PTHREAD_MUTEX_INITIALIZER;
 int curItems[NUM_THREADS];
@@ -53,6 +55,9 @@ pthread_mutex_t mutexFeature[nFeatures];
 
 #define STARTRATING(u) users[u].start
 #define ENDRATING(u) users[u].start + users[u].count
+#define MIN(a,b) ((a < b) ? a : b)
+#define MAX(a,b) ((a > b) ? a : b)
+
 
 enum {
 	NONE = 0,
@@ -292,10 +297,10 @@ void *init_model(void *ptr = NULL) {
 		//p[i] = 1/sqrt(nFeatures) * (randF(-.5,.5)); //randF(-.003,-.003); //.003, .001);
 	}
 	for(int i = rank; i < nItems*nFeatures;i+=NUM_THREADS) {
-		const double total = .01,  min=-.5, max=.5;
-		q[i] = 0;// total/sqrt(nFeatures) * (randF(min, max));
-		x[i] = 0; //total/sqrt(nFeatures) * (randF(min, max));
-		y[i] = 0;// total/sqrt(nFeatures) * (randF(min, max));
+		const double total = 1,  min=-.5, max=.5;
+		q[i] = total/sqrt(nFeatures) * (randF(min, max));
+		x[i] = 2*total/sqrt(nFeatures) * (randF(min, max));
+		y[i] = total/sqrt(nFeatures) * (randF(min, max));
 	}
 
 	pthread_barrier_wait(&barrier);
@@ -324,7 +329,8 @@ double predict(int uid, int iid)
 	sum += bu[uid];
 	sum += bi[iid];
 	for(int f = 0; f < nFeatures; f++) {
-	//	sum += q[iid*nFeatures+f] * p[uid*nFeatures+f];
+		//printf("%g %g %g\n", q[iid*nFeatures+f],  p[uid*nFeatures+f], q[iid*nFeatures+f] * p[uid*nFeatures+f]);
+		sum += q[iid*nFeatures+f] * p[uid*nFeatures+f];
 	}
 	pair<multimapII::const_iterator, multimapII::const_iterator> gp =
 		genreTrackMap.equal_range(iid);
@@ -476,7 +482,7 @@ void *train_model(void *ptr = NULL) {
 			double invsqru = sqrt( 1. / (double)user.count);
 			double invsqnu = sqrt( 1. / (double)(user.count +10)); //user.count+user.qu));
 			int uf =  u*nFeatures;
-			/*for(int f = 0; f < nFeatures; f++) {
+			for(int f = 0; f < nFeatures; f++) {
 				p[uf + f] = 0;
 
 				for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
@@ -494,7 +500,8 @@ void *train_model(void *ptr = NULL) {
 					p[uf+f] += y[j+f] * invsqnu;
 				}
 				sum[f] = 0.;
-			}*/
+			}
+
 			//pthread_barrier_wait(&barrier);
 			for(int r = STARTRATING(u); r < ENDRATING(u); r++ ) {
 				struct rating_s rating = ratings[r];
@@ -512,6 +519,8 @@ void *train_model(void *ptr = NULL) {
 					//for(int f1 = 0; f1 < nFeatures; f1++) {
 					pred += p[uf + f]*q[rating.item*nFeatures+f];
 					//}
+					pred= MAX(0, pred);
+					pred = MIN(100, pred);
 					err = rating.rating - pred;
 					if(f == nFeatures - 1)
 						sq += err*err*SCORENORM*SCORENORM;
@@ -520,11 +529,11 @@ void *train_model(void *ptr = NULL) {
 					double tmpp = p[uf + f];
 					sum[f] += err*tmpq;
 					q[rating.item*nFeatures+f] += GAMMA*(err*tmpp - LAMBDA*tmpq);
-					p[uf+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
+					//p[uf+f] += GAMMA*(err*tmpq - LAMBDA*tmpp);
 				}
-				bu[u] += GAMMA*(err - LAMBDA*bu[u]);
+				bu[u] += userStep2*(err - userReg*bu[u]);
 				pthread_mutex_lock(&mutexB);
-				bi[rating.item] += GAMMA*(err - LAMBDA*tmpbi);
+				bi[rating.item] += itemStep2*(err - itemReg*tmpbi);
 				pthread_mutex_unlock(&mutexB);
 			}
 
@@ -565,6 +574,8 @@ void *train_model(void *ptr = NULL) {
 		} else {
 			GAMMA *= decay;
 			GAMMA2 *= decay;
+			userStep2 *= decay;
+			itemStep2 *= decay;
 			faults = 0;
 		}
 		err = verr;
