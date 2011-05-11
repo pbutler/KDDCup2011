@@ -5,3 +5,5 @@ nTrainRatings=252800275
 nProbeRatings=4003960
 nTestRatings=6005940
 nGenres=992
+nAlbums=88909
+nArtists=27888
