@@ -265,9 +265,9 @@ void *init_model(void *ptr = NULL) {
 
 				pred = CLAMP(pred);
 				err = rating.rating - pred;
-				if(r == 0 ) {
-				printf("%g %g\n", err, pred);
-				}
+				//if(r == 0 ) {
+				//printf("%g %g\n", err, pred);
+				//}
 				sq += err*err*SCORENORM*SCORENORM;
 				bu[u] += userStep*(err - userReg*bu[u]);
 				bi[rating.item] += itemStep*(err - itemReg*tmpbi);
