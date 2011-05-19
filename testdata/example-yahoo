@@ -1,0 +1,28 @@
+Testing if a binary dataset already exists...
+Loaded binary dataset files correctly!
+
+---------
+Statring gradientDescent... (mean score is:50.014)
+Sweep: 1 trainingRMSE=63.5761		tvalidationRMSE=60.374		(0 secs)
+Sweep: 2 trainingRMSE=48.3367		tvalidationRMSE=46.0745		(0 secs)
+Sweep: 3 trainingRMSE=39.6131		tvalidationRMSE=30.6123		(0 secs)
+Sweep: 4 trainingRMSE=35.6885		tvalidationRMSE=27.9395		(0 secs)
+Sweep: 5 trainingRMSE=34.525		tvalidationRMSE=26.9167		(0 secs)
+Sweep: 6 trainingRMSE=34.1608		tvalidationRMSE=26.2489		(0 secs)
+Sweep: 7 trainingRMSE=34.0793		tvalidationRMSE=25.7869		(0 secs)
+Sweep: 8 trainingRMSE=34.1274		tvalidationRMSE=25.5417		(0 secs)
+Sweep: 9 trainingRMSE=34.2508		tvalidationRMSE=25.4905		(0 secs)
+Sweep: 10 trainingRMSE=34.42		tvalidationRMSE=25.5758		(0 secs)
+Sweep: 11 trainingRMSE=34.4106		tvalidationRMSE=25.5822		(0 secs)
+Sweep: 12 trainingRMSE=34.4039		tvalidationRMSE=25.5811		(0 secs)
+Sweep: 13 trainingRMSE=34.598		tvalidationRMSE=25.7477		(0 secs)
+Sweep: 14 trainingRMSE=34.5888		tvalidationRMSE=25.7631		(0 secs)
+Sweep: 15 trainingRMSE=34.5839		tvalidationRMSE=25.7641		(0 secs)
+Early termination since current Validation RMSE (25.7641) is higher than prev. best (25.5811) (number of faults: 3)
+
+---------
+Training RMSE: 34.4039	Validation RMSE: 25.5811, secs:0
+
+---------
+Predicting Track1 TEST data into: track1_results.txt
+Done!

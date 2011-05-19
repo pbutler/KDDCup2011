@@ -8,3 +8,12 @@ cache
 svd.c
 svd.html
 *.track1.dat
+.DS_Store
+track1_results.txt
+predictions.txt
+track1/*Idx1.txt
+track1/*Data1.txt
+modelstats.txt
+src/main
+*.dSYM/*
+*/tmp/*

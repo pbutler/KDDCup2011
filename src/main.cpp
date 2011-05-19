@@ -17,32 +17,42 @@
 using namespace std;
 using namespace __gnu_cxx;
 
-double albumStep	= .5;
-double albumReg		= .5;
-double artistStep	= .5;
-double artistReg	= .5;
-double itemStep		= 1.5;
-double itemReg		= 1;
-double userStep		= 1.5;
-double userReg		= 1;
-double genreStep	= .5;
-double genreReg		= .5;
+double artistStep = 0.0013;
+double itemReg = 0.8447;
+double itemStep = 0.0304;
+double artistReg = 1.4296;
+double genreReg = 1.3657;
+double userReg = 0.0806;
+double userStep = 0.9529;
+double albumStep = 0.086;
+double albumReg = 2.0954;
+double genreStep = 0.0156;
 
-double itemStep2	= 0.005;
-double userStep2	= .5;
 
-double pStep		= .009;
-double pReg		=  .5;
-double qStep		= .008;
-double qReg		=  .4;
+double decay = 0.7967;
+double decaypq = .9;
+double itemStep2	= itemStep;
+double userStep2	= userStep; //.5;
 
-double xStep		= .001 * 1e-4;
+//**START PARAMS
+double pStep		= .003;
+double pReg		=  0.9;
+double qStep		= .003;
+double qReg		=  0.9;
+
+double xStep		= 1e-6;
 double xReg		= .05;
-double yStep		= .001 * 1e-4;
+double yStep		= 1e-6;
 double yReg		= .05 ;
 
+double qMin = -.1;
+double xMin = -.1;
+double yMin = -.1;
+double qMax = .1;
+double xMax = .1;
+double yMax = .1;
+//**END PARAMS
 
-const double decay = .7; //.9;
 #define NUM_THREADS 1
 #define SCORENORM  1.f
 
@@ -70,6 +80,7 @@ pthread_mutex_t mutexFeature[nFeatures];
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 #define CLAMP(p) MAX(MIN(p,100./SCORENORM), 0)
+#define CLAMP2(p) MAX(MIN(p,100./SCORENORM), -100./SCORENORM)
 
 enum {
 	NONE = 0,
@@ -82,8 +93,10 @@ enum {
 struct rating_s {
 	//unsigned int user : 20;
 	unsigned int item : 20;
+	//float rating;
+	//float extra;
 	unsigned int rating : 8;
-	unsigned int extra : 8;
+       	signed int extra : 8;
 } __attribute__((__packed__));
 //};
 
@@ -237,7 +250,6 @@ void *init_model(void *ptr = NULL) {
 	for(int i =rank; i < nAlbums; i += NUM_THREADS) {
 	       bal[i] = 0;
 	}
-	//TODO SOME kind of out of bounds memory writing error
 	double sq, err=1e6, pred, lasterr = 1e6+1, faults = 0;
 	int epoch = 0;
 	while (epoch < maxepochsbias && faults < maxfaults) {
@@ -264,7 +276,7 @@ void *init_model(void *ptr = NULL) {
 				}
 
 				pred = CLAMP(pred);
-				err = rating.rating - pred;
+				err = (double)rating.rating - pred;
 				//if(r == 0 ) {
 				//printf("%g %g\n", err, pred);
 				//}
@@ -290,7 +302,7 @@ void *init_model(void *ptr = NULL) {
 
 			}
 		}
-		//sq = collect_errors(sq, rank);
+		sq = collect_errors(sq, rank);
 		sq = sqrt(sq / (double)nRatings);
 		double vsq = 0;
 		for(int u = rank; u < nUsers; u+=NUM_THREADS) {
@@ -314,7 +326,7 @@ void *init_model(void *ptr = NULL) {
 				}
 				//printf("\n");
 				pred = CLAMP(pred);
-				err = rating.rating - pred;
+				err = (double)rating.rating - pred;
 				vsq += err*err*SCORENORM*SCORENORM;
 			}
 			//printf("%g %d %g\n", err, validations[i].rating, pred);
@@ -343,12 +355,12 @@ void *init_model(void *ptr = NULL) {
 	const double total = 1e-9,  min=-.5, max=.5;
 	for(int i = rank; i < nUsers*nFeatures;i += NUM_THREADS) {
 		//p[i] =  0; //randF(-.003, .001);
-		p[i] = total; // total * (randF(min, max));
+		p[i] = randF(-.1, .1) / sqrt(nFeatures); //*nFeatures); // total * (randF(min, max));
 	}
 	for(int i = rank; i < nItems*nFeatures;i+=NUM_THREADS) {
-		q[i] = 0; //total * (randF(min, max));
-		x[i] = total * (randF(min, max));
-		y[i] = total * (randF(min, max));
+		q[i] = (randF(qMin, qMax)) / sqrt(nFeatures); //*nFeatures);
+		x[i] = (randF(xMin, xMax));
+		y[i] = (randF(yMin, yMax));
 	}
 
 	pthread_barrier_wait(&barrier);
@@ -356,24 +368,27 @@ void *init_model(void *ptr = NULL) {
 	for(int u = rank; u < nUsers; u += NUM_THREADS) {
 		for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
 			struct item_s item = items[ratings[r].item];
-			ratings[r].extra = ratings[r].rating - mu -bu[u] - bi[ratings[r].item];
+			double allbias = (double)ratings[r].rating - mu -bu[u] - bi[ratings[r].item];
 			pair<multimapII::const_iterator, multimapII::const_iterator> p = genreItemMap.equal_range(ratings[r].item);
 			for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 				int gid = (*i).second;
-				ratings[r].extra -= bg[gid];
+				allbias -= bg[gid];
 			}
 			if(item.artistid > -1) {
-				ratings[r].extra -= bar[item.artistid];
+				allbias -= bar[item.artistid];
 			}
 			if(item.albumid > -1) {
-				ratings[r].extra -= bal[item.albumid];
+				allbias -= bal[item.albumid];
 			}
-			ratings[r].extra = (int)CLAMP(ratings[r].extra);
-			sum += ratings[r].extra;
+			//ratings[r].extra = (int)CLAMP(ratings[r].extra);
+
+			ratings[r].extra = (int)allbias;
+			sum += allbias;
 		}
 	}
 	sum = collect_errors(sum, rank);
 	if (rank == 0 ) {
+		printf("mu = %g\n", mu);
 		printf("Average deviation: %g\n", sum/nRatings);
 	}
 	return 0;
@@ -381,8 +396,8 @@ void *init_model(void *ptr = NULL) {
 
 inline double predict(int uid, int iid, bool print = false)
 {
-	//pair<multimapII::const_iterator, multimapII::const_iterator> gp =
-	//	genreItemMap.equal_range(iid);
+	pair<multimapII::const_iterator, multimapII::const_iterator> gp =
+		genreItemMap.equal_range(iid);
 	struct item_s item = items[iid];
 	double sum = mu;
 	if (print)
@@ -392,7 +407,7 @@ inline double predict(int uid, int iid, bool print = false)
 	if(print)
 		printf("bu/i: %g %g %g\n", mu, bu[uid], bi[iid]);
 	bool goprint = false;
-	/*for (multimapII::const_iterator i = gp.first; i != gp.second; ++i) {
+	for (multimapII::const_iterator i = gp.first; i != gp.second; ++i) {
 		int gid = (*i).second;
 		if (!goprint && print) {
 			printf("bg: ");
@@ -401,17 +416,21 @@ inline double predict(int uid, int iid, bool print = false)
 		sum += bg[gid];
 		if(print)
 			printf("%g ", bg[gid]);
-	}*/
+	}
 	if(print && goprint)
 		printf("\n");
+	double apq = 0;
 	for(int f = 0; f < nFeatures; f++) {
 		if (print )
 			printf("pq: %g %g %g\n",
 				       	p[uid*nFeatures+f],
 					q[iid*nFeatures+f],
 					q[iid*nFeatures+f] * p[uid*nFeatures+f]);
-		sum += q[iid*nFeatures+f] * p[uid*nFeatures+f];
+		apq += CLAMP2(q[iid*nFeatures+f] * p[uid*nFeatures+f]);
 	}
+	sum += apq;
+	if(print)
+		printf("pq: %g\n", apq);
 	if(item.artistid > -1) {
 		sum += bar[item.artistid];
 	}
@@ -419,7 +438,7 @@ inline double predict(int uid, int iid, bool print = false)
 		sum += bal[item.albumid];
 	}
 	if(print)
-		printf("-->");
+		printf("%g --> ", sum);
 	return CLAMP(sum);
 }
 
@@ -547,11 +566,10 @@ void *train_model(void *ptr = NULL) {
 	if(ptr != NULL)  {
 		rank = *(int *)ptr;
 	}
-	double lasterr = 1e6+1, sq = 0, err = 1e6;
+	double lasterr = 1e6+1, sq = 0;
 	int epoch = 0, faults = 0;
 	while (faults <  maxfaults && epoch < maxepochs) {
 	//while (epoch < maxepochs) { // && (epochs < 10 || (lasterr - err) > 1e-6))
-		lasterr = err;
 		sq = 0;
 		double start = get_time();
 
@@ -561,7 +579,7 @@ void *train_model(void *ptr = NULL) {
 			double invsqru = sqrt( 1. / (double)user.count);
 			double invsqnu = sqrt( 1. / (double)(user.count +10)); //user.count+user.qu));
 			int uf =  u*nFeatures;
-			for(int f = 0; f < nFeatures; f++) {
+			/*for(int f = 0; f < nFeatures; f++) {
 				p[uf + f] = 0;
 
 				for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
@@ -579,30 +597,33 @@ void *train_model(void *ptr = NULL) {
 					p[uf+f] += y[j+f] * invsqnu;
 				}
 				sum[f] = 0.;
-			}
+			}*/
 
 			//pthread_barrier_wait(&barrier);
 			for(int r = STARTRATING(u); r < ENDRATING(u); r++ ) {
-				struct rating_s rating = ratings[r];
-				double pred = predict(u, rating.item);
+				struct rating_s &rating = ratings[r];
+				assert(rating.rating <= 100);
 				double tmpbi = bi[rating.item];
-				err = rating.rating - pred;
+				double err = (double) rating.rating - predict(u, rating.item);
+				if (err > 100 || err < -100) {
+					printf("ERR OOB: %g %g %g\n", err, (double)rating.rating, predict(u, rating.item));
+				}
 				sq += err*err*SCORENORM*SCORENORM;
 				for(int f = 0; f < nFeatures; f++) {
 					double tmpq = q[rating.item*nFeatures+f];
 					double tmpp = p[uf + f];
-					sum[f] += err*tmpq;
+					//sum[f] += err*tmpq;
 					q[rating.item*nFeatures+f] += qStep*(err*tmpp - qReg*tmpq);
-					//p[uf+f] += pStep*(err*tmpq - pReg*tmpp);
+					p[uf+f] += pStep*(err*tmpq - pReg*tmpp);
 				}
 				bu[u] += userStep2*(err - userReg*bu[u]);
-				pthread_mutex_lock(&mutexB);
+				//pthread_mutex_lock(&mutexB);
 				bi[rating.item] += itemStep2*(err - itemReg*tmpbi);
-				pthread_mutex_unlock(&mutexB);
+				//pthread_mutex_unlock(&mutexB);
 			}
 
 
-			for(int f = 0; f < nFeatures; f++) {
+			/*for(int f = 0; f < nFeatures; f++) {
 				pthread_mutex_lock(&mutexFeature[f]);
 				for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
 					struct rating_s rating = ratings[r] ;
@@ -622,13 +643,13 @@ void *train_model(void *ptr = NULL) {
 					y[i] += yStep*(invsqnu*sum[f] - yReg*y[i]);
 				}
 				pthread_mutex_unlock(&mutexFeature[f]);
-			}
+			}*/
 		}
 		sq = collect_errors(sq, rank);
-		err = sqrt(sq / nRatings);
+		sq = sqrt(sq / nRatings);
 		double verr = validate();
 		if (rank == 0) {
-			printf("epoch=%d RMSE=%g VMRSE=%g" , epoch, err, verr);
+			printf("epoch=%d RMSE=%g VRMSE=%g" , epoch, sq, verr);
 			printf(" time=%g rank=%d\n", get_time()-start, rank);
 
 		}
@@ -636,15 +657,15 @@ void *train_model(void *ptr = NULL) {
 		if (verr > lasterr) {
 			faults++;
 		} else {
-			qStep *= decay;
+			pStep *= decaypq;
+			qStep *= decaypq;
 			xStep *= decay;
 			yStep *= decay;
-			pStep *= decay;
 			userStep2 *= decay;
 			itemStep2 *= decay;
 			faults = 0;
 		}
-		err = verr;
+		lasterr = verr;
 	}
 	return 0;
 }
@@ -742,7 +763,6 @@ void read_data()
 			items[iidx].count += 1;
 			ratings[ridx].item = iidx;
 			ratings[ridx].rating = score;
-			assert(ratings[ridx].rating >= 0);
 			assert(ratings[ridx].rating <= 100);
 			ridx++;
 		}
@@ -922,16 +942,27 @@ void print_model_stats()
 	FILE *fp = fopen("modelstats.txt", "w");
 	fprintf(fp, "# --------------\n");
 	fprintf(fp, "# Stats\n");
-	fprintf(fp, "# --------------\n");
+	fprintf(fp, "# --------------");
 
-	/*for(int f = 0; f < nFeatures; f++) {
-		for(int
-		fprintf("%g %g %g %g\n", p[i]);
-	}
 	for(int f = 0; f < nFeatures; f++) {
-	       	q[i], x[i], y[i]);
-	}*/
-	fprintf(fp, "# MEAN(global) = %g\n\n\n", mu);
+		fprintf(fp, "\n\n\n#p%03d\n", f);
+		for(int  i = 0; i < nUsers; i++) {
+			//fprintf(fp, "%g\n", p[i*nFeatures + f]);
+		}
+		fprintf(fp, "\n\n\n#q%03d\n", f);
+		for(int  i = 0; i < nItems; i++) {
+			fprintf(fp, "%g\n", q[i*nFeatures + f]);
+		}
+		fprintf(fp, "\n\n\n#x%03d\n", f);
+		for(int  i = 0; i < nItems; i++) {
+			fprintf(fp, "%g\n", x[i*nFeatures + f]);
+		}
+		fprintf(fp, "\n\n\n#y%03d\n", f);
+		for(int  i = 0; i < nItems; i++) {
+			fprintf(fp, "%g\n", y[i*nFeatures + f]);
+		}
+	}
+	fprintf(fp, "\n\n\n# MEAN(global) = %g\n\n\n", mu);
 	fprintf(fp, "# User Biases\n");
 	double a = 0;
 	for(int i = 0; i < nUsers; i++) {
@@ -983,6 +1014,57 @@ void make_tmp_dir()
 		mkdir("tmp", 0777);
 }
 
+void read_params(void)
+{
+	FILE *fp = fopen("params.txt", "r");
+	char buf[512], *name, *value;
+	//char *buf = tmp;
+	double d;
+	while(fgets(buf, 512, fp) != NULL) {
+		name = strtok(buf, "=");
+		value = strtok(NULL, "=");
+		bool set = false;
+#define READSET(x) if(strncmp(name, #x, 512) == 0) { x = d; set=true; printf("%s=%g",name,x); }
+		d = strtod(value, NULL);
+		READSET(decay);
+		READSET(itemStep);
+		READSET(itemReg);
+		READSET(userStep);
+		READSET(userReg);
+		READSET(genreStep);
+		READSET(genreReg);
+		READSET(albumStep);
+		READSET(albumReg);
+		READSET(artistStep);
+		READSET(artistReg);
+
+		READSET(userStep2);
+		READSET(itemStep2);
+		READSET(pStep);
+		READSET(pReg);
+		READSET(qStep);
+		READSET(qReg);
+		READSET(xStep);
+		READSET(xReg);
+		READSET(yStep);
+		READSET(yReg);
+		READSET(qMin);
+		READSET(xMin);
+		READSET(yMin);
+		READSET(qMax);
+		READSET(xMax);
+		READSET(yMax);
+		if (!set) {
+			fprintf(stdout, "OOPS! param notfound %s\n", name);
+		} else {
+			fprintf(stdout, "%s=%g\n", name, d);
+		}
+	}
+
+	fclose(fp);
+}
+
+
 void print_usage(char *progname)
 {
 	printf("usage: %s [OPTIONS]\n", progname);
@@ -1010,7 +1092,7 @@ int main (int argc, char **argv)
 	bool isStats = false;
 	bool isPredict = false;
 
-	while ( (c = getopt(argc, argv, "itvme:spf:bE:h")) != -1) {
+	while ( (c = getopt(argc, argv, "itvme:spf:bE:hP")) != -1) {
 		switch (c) {
 			case 'i':
 				isInit = true;
@@ -1038,6 +1120,9 @@ int main (int argc, char **argv)
 				break;
 			case 'p':
 				isPredict = true;
+				break;
+			case 'P':
+				read_params();
 				break;
 			case 'h':
 				print_usage(argv[0]);
@@ -1117,4 +1202,5 @@ int main (int argc, char **argv)
 
 	exit (0);
 }
+
 
