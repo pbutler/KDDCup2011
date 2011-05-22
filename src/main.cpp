@@ -18,7 +18,7 @@
 #define BIASESG 1
 #define BIASESA 1
 #define LATENT 1
-//#define LATENTA 1
+#define LATENTA 1
 
 
 using namespace std;
@@ -38,12 +38,13 @@ double albumReg = 1.0;
 
 
 double decay = 0.811; // 0.7967;
-double decaypq = .9;
+double decaypq = 1.; //.99;
 double itemStep2	= itemStep;
 double userStep2	= userStep; //.5;
+//make sep. Steps for phase 2
 
 //**START PARAMS
-double pStep		= .0015;
+double pStep		= .001;
 double pReg		=  1.0;
 double qStep		= .001;
 double qReg		=  1.0;
@@ -53,14 +54,16 @@ double xReg		= .05;
 double yStep		= 1e-6;
 double yReg		= .05 ;
 
-double pMin = -.2;
-double pMax = .2;
-double qMin = -10;
-double xMin = -.1;
-double yMin = -.1;
-double qMax = 10;
+double pMax = 3;
+double qMax = 3;
 double xMax = .1;
 double yMax = .1;
+
+double pMin = -1 * pMax;
+double qMin = -1 * qMax;
+double xMin = -1 * xMax;
+double yMin = -1 * yMax;
+
 
 double pArStep = 0.09;
 double pArReg = .01;
@@ -69,7 +72,7 @@ double pAlStep = 0.09;
 double pAlReg = .01;
 //**END PARAMS
 
-#define NUM_THREADS 4
+#define NUM_THREADS 1
 #define SCORENORM  1.f
 
 int maxepochs = 20;
@@ -112,8 +115,8 @@ struct rating_s {
 	//float rating;
 	//float extra;
 	unsigned int rating : 8;
-       	signed int extra : 8;
-} __attribute__((__packed__));
+       	//signed int extra : 8;
+}; // __attribute__((__packed__));
 //};
 
 struct item_s {
@@ -391,25 +394,27 @@ void *init_model(void *ptr = NULL) {
 		epoch++;
 	}
 
+	double sqnF = 1./sqrt(nFeatures);
 	for(int i = rank; i < nUsers*nFeatures;i += NUM_THREADS) {
-		p[i] = sqrt(randF(pMin, pMax) / nFeatures); //*nFeatures); // total * (randF(min, max));
-		pAl[i] = sqrt(randF(pMin, pMax) / nFeatures); //*nFeatures); // total * (randF(min, max));
-		pAr[i] = sqrt(randF(pMin, pMax) / nFeatures); //*nFeatures); // total * (randF(min, max));
+		p[i] = randF(pMin, pMax) * sqnF;
+		pAl[i] = randF(pMin, pMax) * sqnF;
+		pAr[i] = randF(pMin, pMax) * sqnF;
 	}
 
 	for(int i = rank; i < nAlbums*nFeatures;i+=NUM_THREADS) {
-		qAl[i] = sqrt(randF(qMin, qMax) / nFeatures); //*nFeatures);
+		qAl[i] = randF(qMin, qMax) * sqnF;
 	}
 	for(int i = rank; i < nArtists*nFeatures;i+=NUM_THREADS) {
-		qAr[i] = sqrt(randF(qMin, qMax) / nFeatures); //*nFeatures);
+		qAr[i] = randF(qMin, qMax) * sqnF;
 	}
 	for(int i = rank; i < nItems*nFeatures;i+=NUM_THREADS) {
-		q[i] = sqrt(randF(qMin, qMax) / nFeatures); //*nFeatures);
-		x[i] = sqrt(randF(xMin, xMax) / nFeatures);
-		y[i] = sqrt(randF(yMin, yMax) / nFeatures);
+		q[i] = randF(qMin, qMax) * sqnF;
+		x[i] = randF(xMin, xMax) * sqnF;
+		y[i] = randF(yMin, yMax) * sqnF;
 	}
 
 	pthread_barrier_wait(&barrier);
+#if 0
 	double sum = 0;
 	for(int u = rank; u < nUsers; u += NUM_THREADS) {
 		for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
@@ -445,6 +450,7 @@ void *init_model(void *ptr = NULL) {
 		printf("mu = %g\n", mu);
 		printf("Average deviation: %g\n", sum/nRatings);
 	}
+#endif
 	return 0;
 }
 
@@ -647,7 +653,7 @@ void *train_model(void *ptr = NULL) {
 	if(ptr != NULL)  {
 		rank = *(int *)ptr;
 	}
-	double lasterr = 1e6+1, sq = 0;
+	double lasterr = 1e6+1, sq = 0, vBest = 1e6;
 	int epoch = 0, faults = 0;
 	while (faults <  maxfaults && epoch < maxepochs) {
 	//while (epoch < maxepochs) { // && (epochs < 10 || (lasterr - err) > 1e-6))
@@ -705,6 +711,9 @@ void *train_model(void *ptr = NULL) {
 #endif //BIASES
 
 				if(item.albumid > -1) {
+#ifdef BIASA
+					bal[item.albumid] += albumStep*(err - albumReg*bal[item.albumid]);
+#endif //BIASA
 #ifdef LATENTA
 					for(int f = 0; f < nFeatures; f++) {
 						int iif = item.albumid*nFeatures+f;
@@ -716,6 +725,9 @@ void *train_model(void *ptr = NULL) {
 #endif // LATENTA
 				}
 				if(item.artistid > -1) {
+#ifdef BIASA
+					bar[item.artistid] += artistStep*(err - artistReg*bar[item.artistid]);
+#endif //BIASA
 #ifdef LATENTA
 					for(int f = 0; f < nFeatures; f++) {
 						int iif = item.artistid*nFeatures+f;
@@ -755,6 +767,7 @@ void *train_model(void *ptr = NULL) {
 		sq = collect_values(sq, rank);
 		sq = sqrt(sq / nRatings);
 		double verr = validate();
+		vBest = min(verr, vBest);
 		if (rank == 0) {
 			printf("epoch=%d RMSE=%g VRMSE=%g" , epoch, sq, verr);
 			printf(" time=%g rank=%d\n", get_time()-start, rank);
@@ -774,6 +787,7 @@ void *train_model(void *ptr = NULL) {
 		}
 		lasterr = verr;
 	}
+	printf("Best is %lf\n", vBest);
 	return 0;
 }
 
@@ -1201,8 +1215,9 @@ int main (int argc, char **argv)
 	bool isBuildModel = false;
 	bool isStats = false;
 	bool isPredict = false;
+	bool printVerify = true;
 
-	while ( (c = getopt(argc, argv, "itvme:spf:bE:hP")) != -1) {
+	while ( (c = getopt(argc, argv, "itvVme:spf:bE:hP")) != -1) {
 		switch (c) {
 			case 'i':
 				isInit = true;
@@ -1215,6 +1230,10 @@ int main (int argc, char **argv)
 				break;
 			case 'v':
 				isVerify = true;
+				break;
+			case 'V':
+				isVerify = true;
+				printVerify = false;
 				break;
 			case 's':
 				isStats = true;
@@ -1301,7 +1320,7 @@ int main (int argc, char **argv)
 	}
 
 	if (isVerify) {
-		printf("VRMSE = %g\n", validate(true));
+		printf("VRMSE = %g\n", validate(printVerify));
 	}
 
 	if(isPredict) {
