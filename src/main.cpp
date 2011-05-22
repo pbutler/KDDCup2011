@@ -14,51 +14,67 @@
 #include <sys/time.h>
 #include <assert.h>
 
+#define BIASES 1
+#define BIASESG 1
+#define BIASESA 1
+#define LATENT 1
+//#define LATENTA 1
+
+
 using namespace std;
 using namespace __gnu_cxx;
 
-double artistStep = 0.0013;
-double itemReg = 0.8447;
-double itemStep = 0.0304;
-double artistReg = 1.4296;
-double genreReg = 1.3657;
-double userReg = 0.0806;
-double userStep = 0.9529;
-double albumStep = 0.086;
-double albumReg = 2.0954;
-double genreStep = 0.0156;
+double userStep = 1.5; //0.9529;
+double itemStep = .005; // 0.0304;
+double genreStep = 0.005;
+double artistStep = 0.005;
+double albumStep = 0.005;
+
+double userReg = 1.0; //0.0806;
+double itemReg = 1.0;  //0.8447;
+double genreReg = 1.0;
+double artistReg = 1.0;
+double albumReg = 1.0;
 
 
-double decay = 0.7967;
+double decay = 0.811; // 0.7967;
 double decaypq = .9;
 double itemStep2	= itemStep;
 double userStep2	= userStep; //.5;
 
 //**START PARAMS
-double pStep		= .003;
-double pReg		=  0.9;
-double qStep		= .003;
-double qReg		=  0.9;
+double pStep		= .0015;
+double pReg		=  1.0;
+double qStep		= .001;
+double qReg		=  1.0;
 
 double xStep		= 1e-6;
 double xReg		= .05;
 double yStep		= 1e-6;
 double yReg		= .05 ;
 
-double qMin = -.1;
+double pMin = -.2;
+double pMax = .2;
+double qMin = -10;
 double xMin = -.1;
 double yMin = -.1;
-double qMax = .1;
+double qMax = 10;
 double xMax = .1;
 double yMax = .1;
+
+double pArStep = 0.09;
+double pArReg = .01;
+
+double pAlStep = 0.09;
+double pAlReg = .01;
 //**END PARAMS
 
-#define NUM_THREADS 1
+#define NUM_THREADS 4
 #define SCORENORM  1.f
 
 int maxepochs = 20;
 int maxepochsbias = 20;
-int maxfaults = 2;
+int maxfaults = 3;
 
 unsigned int nUsers = 0;
 unsigned int nItems = 0;
@@ -69,7 +85,7 @@ unsigned int nGenres = 0;
 unsigned int nAlbums = 0;
 unsigned int nArtists = 0;
 
-const unsigned int nFeatures = 10;
+const unsigned int nFeatures = 100;
 
 pthread_mutex_t mutexB = PTHREAD_MUTEX_INITIALIZER;
 int curItems[NUM_THREADS];
@@ -79,7 +95,7 @@ pthread_mutex_t mutexFeature[nFeatures];
 #define ENDRATING(u) users[u].start + users[u].count
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
-#define CLAMP(p) MAX(MIN(p,100./SCORENORM), 0)
+#define CLAMP(p) MAX(MIN(p,100./SCORENORM), 0.)
 #define CLAMP2(p) MAX(MIN(p,100./SCORENORM), -100./SCORENORM)
 
 enum {
@@ -126,6 +142,7 @@ unsigned int umaplen = 0,imaplen = 0;
 hash_map<int, int> imap;
 hash_map<int, int> umap;
 double *bu, *bi, *p, *x, *y, *q, *bg, *bal, *bar;
+double *pAl, *pAr, *qAl, *qAr;
 struct rating_s *ratings;
 struct item_s *items;
 struct user_s *users;
@@ -135,7 +152,7 @@ double mu;
 
 pthread_barrier_t barrier;
 
-inline double collect_errors(double err, int rank) {
+inline double collect_values(double err, int rank) {
 	terrs[rank] = err;
 	pthread_barrier_wait(&barrier);
 	err = 0;
@@ -228,6 +245,11 @@ void load_model()
 	q = (double*)open_rw("tmp/q.mmap", sizeof(double)*nFeatures*nItems);
 	x = (double*)open_rw("tmp/x.mmap", sizeof(double)*nFeatures*nItems);
 	y = (double*)open_rw("tmp/y.mmap", sizeof(double)*nFeatures*nItems);
+
+	pAl = (double *)open_rw("tmp/pAl.mmap", sizeof(double)*nFeatures*nUsers);
+	qAl = (double*)open_rw("tmp/qAl.mmap", sizeof(double)*nFeatures*nAlbums);
+	pAr = (double *)open_rw("tmp/pAr.mmap", sizeof(double)*nFeatures*nUsers);
+	qAr = (double*)open_rw("tmp/qAr.mmap", sizeof(double)*nFeatures*nArtists);
 }
 
 void *init_model(void *ptr = NULL) {
@@ -256,43 +278,53 @@ void *init_model(void *ptr = NULL) {
 		double start = get_time();
 		lasterr = err;
 		sq = 0;
-		for(int u = 0; u < nUsers; u++) {
+		for(int u = rank; u < nUsers; u+=NUM_THREADS) {
 			for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
 				struct rating_s rating = ratings[r];
 				struct item_s item = items[rating.item];
 				double tmpbi = bi[rating.item];
+#ifdef BIASES
 				pred = mu + bu[u] + tmpbi;
+#else
+				pred = 0;
+#endif
 				//fprintf(stderr, "%d\n", rating.item);
+#ifdef BIASESG
 				pair<multimapII::const_iterator, multimapII::const_iterator> p =
 					genreItemMap.equal_range(rating.item);
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					pred += bg[(*i).second];
 				}
+#endif
+#ifdef BIASESA
 				if(item.artistid > -1) {
 					pred += bar[item.artistid];
 				}
 				if(item.albumid > -1) {
 					pred += bal[item.albumid];
 				}
-
+#endif
 				pred = CLAMP(pred);
 				err = (double)rating.rating - pred;
-				//if(r == 0 ) {
-				//printf("%g %g\n", err, pred);
-				//}
 				sq += err*err*SCORENORM*SCORENORM;
+#ifdef BIASES
 				bu[u] += userStep*(err - userReg*bu[u]);
 				bi[rating.item] += itemStep*(err - itemReg*tmpbi);
+#endif // BIASES
+#ifdef BIASESG
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					int gid = (*i).second;
 					bg[gid] += genreStep*(err - genreReg*bg[gid]);
 				}
+#endif //BIASESG
+#ifdef BIASESA
 				if(item.artistid > -1) {
 					bar[item.artistid] += artistStep*(err - artistReg*bar[item.artistid]);
 				}
 				if(item.albumid > -1) {
 					bal[item.albumid] += albumStep*(err - albumReg*bal[item.albumid]);
 				}
+#endif //BIASESA
 				/*pthread_mutex_lock(&mutexB);
 				bi[rating.item] += itemStep2*(err - itemReg*tmpbi);
 				pthread_mutex_unlock(&mutexB);
@@ -302,28 +334,35 @@ void *init_model(void *ptr = NULL) {
 
 			}
 		}
-		sq = collect_errors(sq, rank);
+		sq = collect_values(sq, rank);
 		sq = sqrt(sq / (double)nRatings);
 		double vsq = 0;
 		for(int u = rank; u < nUsers; u+=NUM_THREADS) {
 			for(int r = u*4; r < (u+1)*4; r++) {
 				struct rating_s rating = validations[r];
 				struct item_s item = items[ratings[r].item];
+#ifdef BIASES
+				pred = mu + bu[u] + bi[rating.item];
+#else
+				pred = 0;
+#endif //BIASES
 				pair<multimapII::const_iterator, multimapII::const_iterator> p =
 					genreItemMap.equal_range(rating.item);
-
-				pred = mu + bu[u] + bi[rating.item];
 				//printf("%g %g %g %d ", mu, bu[u], bi[rating.item],rating.item);
+#ifdef BIASESG
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					int gid = (*i).second;
 					pred += bg[gid];
 				}
+#endif //BIASESG
+#ifdef BIASESA
 				if(item.artistid > -1) {
 					pred += bar[item.artistid];
 				}
 				if(item.albumid > -1) {
 					pred += bal[item.albumid];
 				}
+#endif // BIASESA
 				//printf("\n");
 				pred = CLAMP(pred);
 				err = (double)rating.rating - pred;
@@ -332,7 +371,7 @@ void *init_model(void *ptr = NULL) {
 			//printf("%g %d %g\n", err, validations[i].rating, pred);
 		}
 
-		vsq = collect_errors(vsq, rank);
+		vsq = collect_values(vsq, rank);
 		vsq = sqrt(vsq / (double)nValidations);
 		err = vsq;
 
@@ -352,15 +391,22 @@ void *init_model(void *ptr = NULL) {
 		epoch++;
 	}
 
-	const double total = 1e-9,  min=-.5, max=.5;
 	for(int i = rank; i < nUsers*nFeatures;i += NUM_THREADS) {
-		//p[i] =  0; //randF(-.003, .001);
-		p[i] = randF(-.1, .1) / sqrt(nFeatures); //*nFeatures); // total * (randF(min, max));
+		p[i] = sqrt(randF(pMin, pMax) / nFeatures); //*nFeatures); // total * (randF(min, max));
+		pAl[i] = sqrt(randF(pMin, pMax) / nFeatures); //*nFeatures); // total * (randF(min, max));
+		pAr[i] = sqrt(randF(pMin, pMax) / nFeatures); //*nFeatures); // total * (randF(min, max));
+	}
+
+	for(int i = rank; i < nAlbums*nFeatures;i+=NUM_THREADS) {
+		qAl[i] = sqrt(randF(qMin, qMax) / nFeatures); //*nFeatures);
+	}
+	for(int i = rank; i < nArtists*nFeatures;i+=NUM_THREADS) {
+		qAr[i] = sqrt(randF(qMin, qMax) / nFeatures); //*nFeatures);
 	}
 	for(int i = rank; i < nItems*nFeatures;i+=NUM_THREADS) {
-		q[i] = (randF(qMin, qMax)) / sqrt(nFeatures); //*nFeatures);
-		x[i] = (randF(xMin, xMax));
-		y[i] = (randF(yMin, yMax));
+		q[i] = sqrt(randF(qMin, qMax) / nFeatures); //*nFeatures);
+		x[i] = sqrt(randF(xMin, xMax) / nFeatures);
+		y[i] = sqrt(randF(yMin, yMax) / nFeatures);
 	}
 
 	pthread_barrier_wait(&barrier);
@@ -368,25 +414,33 @@ void *init_model(void *ptr = NULL) {
 	for(int u = rank; u < nUsers; u += NUM_THREADS) {
 		for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
 			struct item_s item = items[ratings[r].item];
+#ifdef BIASES
 			double allbias = (double)ratings[r].rating - mu -bu[u] - bi[ratings[r].item];
+#else
+			double allbias = (double)ratings[r].rating ;
+#endif //BIASES
+#ifdef BIASESG
 			pair<multimapII::const_iterator, multimapII::const_iterator> p = genreItemMap.equal_range(ratings[r].item);
 			for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 				int gid = (*i).second;
 				allbias -= bg[gid];
 			}
+#endif //BIASESG
+#ifdef BIASESA
 			if(item.artistid > -1) {
 				allbias -= bar[item.artistid];
 			}
 			if(item.albumid > -1) {
 				allbias -= bal[item.albumid];
 			}
+#endif //BIASESA
 			//ratings[r].extra = (int)CLAMP(ratings[r].extra);
 
 			ratings[r].extra = (int)allbias;
 			sum += allbias;
 		}
 	}
-	sum = collect_errors(sum, rank);
+	sum = collect_values(sum, rank);
 	if (rank == 0 ) {
 		printf("mu = %g\n", mu);
 		printf("Average deviation: %g\n", sum/nRatings);
@@ -396,17 +450,19 @@ void *init_model(void *ptr = NULL) {
 
 inline double predict(int uid, int iid, bool print = false)
 {
-	pair<multimapII::const_iterator, multimapII::const_iterator> gp =
-		genreItemMap.equal_range(iid);
 	struct item_s item = items[iid];
-	double sum = mu;
+	double sum = 0;
 	if (print)
 		printf("\n\n");
-	sum += bu[uid];
-	sum += bi[iid];
+#ifdef BIASES
+	sum += mu + bu[uid] + bi[iid];
 	if(print)
 		printf("bu/i: %g %g %g\n", mu, bu[uid], bi[iid]);
+#endif //BIASES
+#ifdef BIASESG
 	bool goprint = false;
+	pair<multimapII::const_iterator, multimapII::const_iterator> gp =
+		genreItemMap.equal_range(iid);
 	for (multimapII::const_iterator i = gp.first; i != gp.second; ++i) {
 		int gid = (*i).second;
 		if (!goprint && print) {
@@ -419,7 +475,9 @@ inline double predict(int uid, int iid, bool print = false)
 	}
 	if(print && goprint)
 		printf("\n");
+#endif //BIASESG
 	double apq = 0;
+#ifdef LATENT
 	for(int f = 0; f < nFeatures; f++) {
 		if (print )
 			printf("pq: %g %g %g\n",
@@ -430,13 +488,30 @@ inline double predict(int uid, int iid, bool print = false)
 	}
 	sum += apq;
 	if(print)
-		printf("pq: %g\n", apq);
-	if(item.artistid > -1) {
-		sum += bar[item.artistid];
-	}
+		printf("pqT: %g\n", apq);
+#endif //LATENT
+#ifdef LATENTA
+	apq = 0;
 	if(item.albumid > -1) {
 		sum += bal[item.albumid];
+		for(int f = 0; f < nFeatures; f++) {
+			apq += CLAMP2(qAl[item.albumid*nFeatures+f] * pAl[uid*nFeatures+f]);
+		}
 	}
+	sum += apq;
+	if(print)
+		printf("Alpq: %g\n", apq);
+	apq = 0;
+	if(item.artistid > -1) {
+		sum += bar[item.artistid];
+		for(int f = 0; f < nFeatures; f++) {
+			apq += CLAMP2(qAr[item.artistid*nFeatures+f] * pAr[uid*nFeatures+f]);
+		}
+	}
+	sum += apq;
+	if(print)
+		printf("Arpq: %g\n", apq);
+#endif //LATENT
 	if(print)
 		printf("%g --> ", sum);
 	return CLAMP(sum);
@@ -464,8 +539,9 @@ void make_predictions()
 	FILE *fp = fopen("predictions.txt", "w");
 	for(int u = 0; u < nUsers; u++) {
 		for(int r = 0; r < 6; r++) {
-			double pred = predict(u,tests[r].item);
-			fprintf(fp, "%lg\n", pred*SCORENORM);
+			int iid = u*6 +r;
+			double pred = predict(u,tests[iid].item);
+			fprintf(fp, "%lf\n", pred); //*SCORENORM);
 		}
 	}
 	fclose(fp);
@@ -494,7 +570,6 @@ void read_tests()
 			parseInt(data, &didx, &hr, size);
 			parseInt(data, &didx, &min, size);
 			parseInt(data, &didx, &sec, size);
-			score = (double) stmp / SCORENORM;
 			if( imap.count(iid) == 0) {
 				iidx = imaplen;
 				imaplen ++;
@@ -502,11 +577,14 @@ void read_tests()
 
 				items[iidx].id = iid;
 				items[iidx].count = 0;
+				items[iidx].albumid = -1;
+				items[iidx].artistid = -1;
 			} else {
 				iidx = imap[iid];
+				assert(items[iidx].id == iid);
 			}
 			tests[ridx].item = iidx;
-			tests[ridx].rating = stmp;
+			tests[ridx].rating = 0;
 			ridx++;
 		}
 	}
@@ -547,8 +625,11 @@ void read_validate()
 
 				items[iidx].id = iid;
 				items[iidx].count = 0;
+				items[iidx].artistid = -1;
+				items[iidx].albumid = -1;
 			} else {
 				iidx = imap[iid];
+				assert(items[iidx].id == iid);
 			}
 			validations[ridx].item = iidx;
 			validations[ridx].rating = score;
@@ -602,13 +683,14 @@ void *train_model(void *ptr = NULL) {
 			//pthread_barrier_wait(&barrier);
 			for(int r = STARTRATING(u); r < ENDRATING(u); r++ ) {
 				struct rating_s &rating = ratings[r];
-				assert(rating.rating <= 100);
-				double tmpbi = bi[rating.item];
+				struct item_s &item = items[rating.item];
 				double err = (double) rating.rating - predict(u, rating.item);
+				double tmpbi = bi[rating.item];
 				if (err > 100 || err < -100) {
 					printf("ERR OOB: %g %g %g\n", err, (double)rating.rating, predict(u, rating.item));
 				}
 				sq += err*err*SCORENORM*SCORENORM;
+#ifdef LATENT
 				for(int f = 0; f < nFeatures; f++) {
 					double tmpq = q[rating.item*nFeatures+f];
 					double tmpp = p[uf + f];
@@ -616,9 +698,34 @@ void *train_model(void *ptr = NULL) {
 					q[rating.item*nFeatures+f] += qStep*(err*tmpp - qReg*tmpq);
 					p[uf+f] += pStep*(err*tmpq - pReg*tmpp);
 				}
+#endif //LATENT
+#ifdef BIASES
 				bu[u] += userStep2*(err - userReg*bu[u]);
-				//pthread_mutex_lock(&mutexB);
 				bi[rating.item] += itemStep2*(err - itemReg*tmpbi);
+#endif //BIASES
+
+				if(item.albumid > -1) {
+#ifdef LATENTA
+					for(int f = 0; f < nFeatures; f++) {
+						int iif = item.albumid*nFeatures+f;
+						double tmpq = qAl[iif];
+						double tmpp = pAl[uf+f];
+						qAl[iif] += qStep*(err*tmpp - qReg*tmpq);
+						pAl[uf+f] += pStep*(err*tmpq - pReg*tmpp);
+					}
+#endif // LATENTA
+				}
+				if(item.artistid > -1) {
+#ifdef LATENTA
+					for(int f = 0; f < nFeatures; f++) {
+						int iif = item.artistid*nFeatures+f;
+						double tmpq = qAr[iif];
+						double tmpp = pAr[uf+f];
+						qAr[iif] += qStep*(err*tmpp - qReg*tmpq);
+						pAr[uf+f] += pStep*(err*tmpq - pReg*tmpp);
+					}
+#endif //LATENTA
+				}
 				//pthread_mutex_unlock(&mutexB);
 			}
 
@@ -645,7 +752,7 @@ void *train_model(void *ptr = NULL) {
 				pthread_mutex_unlock(&mutexFeature[f]);
 			}*/
 		}
-		sq = collect_errors(sq, rank);
+		sq = collect_values(sq, rank);
 		sq = sqrt(sq / nRatings);
 		double verr = validate();
 		if (rank == 0) {
@@ -670,11 +777,13 @@ void *train_model(void *ptr = NULL) {
 	return 0;
 }
 
+#if 0
 void kickoff(void *(*foo)(void*))
 {
 	foo((void *)0);
 }
-#if 0
+#endif
+#if 1
 void kickoff(void *(*foo)(void*))
 {
 	pthread_t thread[NUM_THREADS];
@@ -759,6 +868,7 @@ void read_data()
 				items[iidx].albumid = -1;
 			} else {
 				iidx = imap[iid];
+				assert(items[iidx].id == iid);
 			}
 			items[iidx].count += 1;
 			ratings[ridx].item = iidx;
@@ -1083,7 +1193,7 @@ void print_usage(char *progname)
 
 int main (int argc, char **argv)
 {
-	srandom(time(NULL));
+	//srandom(time(NULL));
 	int c;
 	bool isInit = false;
 	bool isTrain = false;
