@@ -62,21 +62,9 @@ class Source(object):
 
     def getGenes(self):
         ret = self.params.copy()
-        for k in ret:
-            ret[k] = 1
+        #for k in ret:
+        #    ret[k] = 1
         return ret
-
-    def compileWithParams(self, params):
-        total = self.preamble
-        total += "//startGenerated\n"
-        for k in params:
-            total += "double %s = %g;\n" % ( k, params[k])
-        total += "//stopGenerated\n"
-        total += self.rest
-
-        open("apt.cpp", "w").write(total)
-        results = subprocess.Popen(["g++", "-O3", "-o", "apt", "apt.cpp"]).communicate()
-        #os.unlink("apt.cpp")
 
 
 class GAPT(object):
@@ -86,16 +74,23 @@ class GAPT(object):
         else:
             s = Source()
             self.genes = s.getGenes()
-            self.mutate(len(self.genes))
+            self.mutate( 1+int(random.random() * len(self.genes)))
         self.valuation = None
 
     def mate(self, babymama):
         babygenes = {}
+        if random.random() > .5:
+            avg = True
+        else:
+            avg = False
         for k in self.genes:
-            if random.random() > .5:
-                babygenes[k] = self.genes[k]
+            if avg:
+                babygenes[k] = (self.genes[k] + babymama.genes[k]) /2.
             else:
-                babygenes[k] = babymama.genes[k]
+                if random.random() > .5:
+                    babygenes[k] = self.genes[k]
+                else:
+                   babygenes[k] = babymama.genes[k]
         return GAPT(babygenes)
 
     def evaluate(self):
@@ -109,10 +104,10 @@ class GAPT(object):
         for k in self.genes:
             file.write("%s=%g\n" %(k, self.genes[k]))
         file.close()
-        results = subprocess.Popen(["../src/main","-P", "-m", "-t" ],stdout=subprocess.PIPE).communicate()[0]
+        results = subprocess.Popen(["../src/main","-P", "-m", ],stdout=subprocess.PIPE).communicate()[0]
         #print results
         os.chdir(curdir)
-        vrmsere = re.compile(r"VRMSE=([-e0-9.]+)")
+        vrmsere = re.compile(r"Best is ([-e0-9.]+)")
         val = 0
         minval = None
         for line in results.strip().split("\n"):
@@ -128,22 +123,40 @@ class GAPT(object):
         self.valuation = minval
         return val
 
-    def mutate(self, n = 3):
+    def mutate(self, n = None):
+        if n is None:
+            w = len(self.genes) / 2.
+            n = random.normalvariate(2*w/3., w/2)
+            n = int(min(max(1, n), len(self.genes)))
+        n = len(self.genes)
         keys = random.sample(self.genes.keys(), n)
         for k in keys:
-            if k.endswith("Step"):
-                mn = 0
-                mx = .001
-            elif k.endswith("Min"):
-                mn = -.3
-                mx = 0
-            elif k.endswith("Max"):
-                mn = 0
-                mx = .1
-            else:
-                mn = 0
-                mx = 2
-            self.genes[k] = (mx-mn)*(random.random()) + mn
+            m = 10**int(random.random()*3+1)
+            r= int(random.normalvariate(0, 10./3)) / float(m)
+            if r == 0:
+                r = 2*int(random.random()-.5) / float(m)
+            self.genes[k] += r
+            if self.genes[k] <= 0:
+                self.genes[k] = int(1+100*random.random()) / 1000.
+            #if k == "itemStep":
+            #    self.genes[k] += int((random.random()-.5)*100)/10000.
+            #else:
+            #    self.genes[k] += random.normalvariate(0, .1/3)
+            #    if self.genes[k] < 0:
+            #        self.genes[k] = random.random()
+            #if k.endswith("Step"):
+            #    mn = 0
+            #    mx = 2 #.001
+            #elif k.endswith("Min"):
+            #    mn = -.3
+            #    mx = 0
+            #elif k.endswith("Max"):
+            #    mn = 0
+            #    mx = .1
+            #else:
+            #    mn = 0
+            #    mx = 2
+            #self.genes[k] = (mx-mn)*(random.random()) + mn
 
     def copy(self):
         return GAPT(self.genes.copy())
@@ -154,6 +167,8 @@ class GAPT(object):
         return  ", ".join( [ k+" = " + str(v) for k,v in self.genes.items() ])
 
 def selectWithProb(l):
+    #return int( len(l)*random.random() )
+    l = [ 1./i for i in range(1,1+len(l)) ]
     all = sum(l)
     r = random.random()*all
     a = 0
@@ -175,30 +190,37 @@ def cull(population, maxpop):
 def foo(p):
     return p.evaluate(), p
 
-def runGA(pop = 60, keep = 20, mrate = .2, runs = 100):
+def runGA(pop = 100, keep = 20, mrate = .7, runs = 100):
     population = [ GAPT() for i in range(pop)]
 
-    pool = Pool(4)
+    #pool = Pool(4)
 
     best = None
     bestN = None
     try:
         for run in range(runs):
             #evaluate
-            ranks = pool.map(foo, population) # for p in population ]
+            ranks = map(foo, population) # for p in population ]
+            #ranks = pool.map(foo, population) # for p in population ]
             ranks.sort()
+            ranks[:keep]
 
             population = [ p for e,p in ranks]
             fits = [ e for e,p in ranks]
 
             #breed
             offspring = []
+
             for i in range(pop - keep): #en(population)):
                 mom, dad = selectWithProb(fits), selectWithProb(fits)
-                while mom != dad:
+                while mom == dad:
                     mom, dad = selectWithProb(fits), selectWithProb(fits)
+                #print mom, dad
                 offspring += [ population[dad].mate(population[mom]) ]
-
+                #print population[mom]
+                #print population[dad]
+                #print offspring[-1]
+                #print
             #mutate
             for p in offspring:
                 if random.random() < mrate:

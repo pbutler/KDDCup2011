@@ -24,26 +24,26 @@
 using namespace std;
 using namespace __gnu_cxx;
 
-double userStep = 1.5; //0.9529;
-double itemStep = .005; // 0.0304;
-double genreStep = 0.005;
-double artistStep = 0.005;
-double albumStep = 0.005;
+//**START PARAMS
+double artistStep = 0.00978125;
+double itemReg = 0.004;
+double decay = 0.553005;
+double itemStep = 0.0245;
+double artistReg = 2.19303;
+double genreReg = 2.84698;
+double userReg = 0.132063;
+double userStep = 1.21402;
+double albumStep = 0.00028125;
+double albumReg = 1.32385;
+double genreStep = 0.0482402;
 
-double userReg = 1.0; //0.0806;
-double itemReg = 1.0;  //0.8447;
-double genreReg = 1.0;
-double artistReg = 1.0;
-double albumReg = 1.0;
+//**END PARAMS
 
-
-double decay = 0.811; // 0.7967;
 double decaypq = 1.; //.99;
 double itemStep2	= itemStep;
 double userStep2	= userStep; //.5;
 //make sep. Steps for phase 2
 
-//**START PARAMS
 double pStep		= .001;
 double pReg		=  1.0;
 double qStep		= .001;
@@ -65,12 +65,11 @@ double xMin = -1 * xMax;
 double yMin = -1 * yMax;
 
 
-double pArStep = 0.09;
+double pArStep = 0.005;
 double pArReg = .01;
 
-double pAlStep = 0.09;
+double pAlStep = 0.005;
 double pAlReg = .01;
-//**END PARAMS
 
 #define NUM_THREADS 1
 #define SCORENORM  1.f
@@ -212,7 +211,7 @@ void *open_read(const char *file, ssize_t *size)
 	return data;
 }
 
-void *open_rw(const char *file, ssize_t size)
+void *open_rw(const char *file, ssize_t size, int advice = MADV_SEQUENTIAL)
 {
 	struct stat sbuf;
 	int f = open(file, O_APPEND|O_RDWR|O_CREAT, 0664);
@@ -226,7 +225,7 @@ void *open_rw(const char *file, ssize_t size)
 		if ( errno == EINVAL) printf("INVAL\n");
 		return NULL;
 	}
-	madvise(data, size, MADV_SEQUENTIAL);
+	madvise(data, size, advice);
 	return data;
 }
 
@@ -241,18 +240,18 @@ void load_model()
 	ratings = (struct rating_s*)open_rw("tmp/ratings.mmap", sizeof(rating_s)*nRatings);
 	validations= (struct rating_s*)open_rw("tmp/validations.mmap", sizeof(rating_s)*nValidations);
 	tests = (struct rating_s*)open_rw("tmp/tests.mmap", sizeof(rating_s)*nTests);
-	items = (struct item_s*)open_rw("tmp/items.mmap", sizeof(item_s)*nItems);
+	items = (struct item_s*)open_rw("tmp/items.mmap", sizeof(item_s)*nItems, MADV_RANDOM);
 	users = (struct user_s*)open_rw("tmp/users.mmap", sizeof(user_s)*nUsers);
 
 	p = (double *)open_rw("tmp/p.mmap", sizeof(double)*nFeatures*nUsers);
-	q = (double*)open_rw("tmp/q.mmap", sizeof(double)*nFeatures*nItems);
-	x = (double*)open_rw("tmp/x.mmap", sizeof(double)*nFeatures*nItems);
-	y = (double*)open_rw("tmp/y.mmap", sizeof(double)*nFeatures*nItems);
+	q = (double*)open_rw("tmp/q.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
+	x = (double*)open_rw("tmp/x.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
+	y = (double*)open_rw("tmp/y.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
 
 	pAl = (double *)open_rw("tmp/pAl.mmap", sizeof(double)*nFeatures*nUsers);
-	qAl = (double*)open_rw("tmp/qAl.mmap", sizeof(double)*nFeatures*nAlbums);
+	qAl = (double*)open_rw("tmp/qAl.mmap", sizeof(double)*nFeatures*nAlbums, MADV_RANDOM);
 	pAr = (double *)open_rw("tmp/pAr.mmap", sizeof(double)*nFeatures*nUsers);
-	qAr = (double*)open_rw("tmp/qAr.mmap", sizeof(double)*nFeatures*nArtists);
+	qAr = (double*)open_rw("tmp/qAr.mmap", sizeof(double)*nFeatures*nArtists, MADV_RANDOM);
 }
 
 void *init_model(void *ptr = NULL) {
@@ -275,11 +274,10 @@ void *init_model(void *ptr = NULL) {
 	for(int i =rank; i < nAlbums; i += NUM_THREADS) {
 	       bal[i] = 0;
 	}
-	double sq, err=1e6, pred, lasterr = 1e6+1, faults = 0;
-	int epoch = 0;
+	double sq, err=1e6, pred, lasterr = 1e6+1, vBest= 1e6;
+	int epoch = 0, faults = 0;
 	while (epoch < maxepochsbias && faults < maxfaults) {
 		double start = get_time();
-		lasterr = err;
 		sq = 0;
 		for(int u = rank; u < nUsers; u+=NUM_THREADS) {
 			for(int r = STARTRATING(u); r < ENDRATING(u); r++) {
@@ -377,6 +375,7 @@ void *init_model(void *ptr = NULL) {
 		vsq = collect_values(vsq, rank);
 		vsq = sqrt(vsq / (double)nValidations);
 		err = vsq;
+		vBest = MIN(vsq, vBest);
 
 		if (rank == 0 ) {
 			printf("BIAS epoch=%d RMSE=%g VRMSE=%g time=%g\n", epoch, sq, vsq, get_time()-start, sq);
@@ -392,8 +391,12 @@ void *init_model(void *ptr = NULL) {
 			faults = 0;
 		}
 		epoch++;
+		lasterr = err;
 	}
 
+	if (rank == 0)
+		printf("Best is %lf\n", vBest);
+#if defined(LATENT) || defined(LATENTA)
 	double sqnF = 1./sqrt(nFeatures);
 	for(int i = rank; i < nUsers*nFeatures;i += NUM_THREADS) {
 		p[i] = randF(pMin, pMax) * sqnF;
@@ -412,7 +415,7 @@ void *init_model(void *ptr = NULL) {
 		x[i] = randF(xMin, xMax) * sqnF;
 		y[i] = randF(yMin, yMax) * sqnF;
 	}
-
+#endif
 	pthread_barrier_wait(&barrier);
 #if 0
 	double sum = 0;
@@ -768,6 +771,7 @@ void *train_model(void *ptr = NULL) {
 		sq = sqrt(sq / nRatings);
 		double verr = validate();
 		vBest = min(verr, vBest);
+
 		if (rank == 0) {
 			printf("epoch=%d RMSE=%g VRMSE=%g" , epoch, sq, verr);
 			printf(" time=%g rank=%d\n", get_time()-start, rank);
@@ -787,7 +791,8 @@ void *train_model(void *ptr = NULL) {
 		}
 		lasterr = verr;
 	}
-	printf("Best is %lf\n", vBest);
+	if (rank == 0)
+		printf("Best is %lf\n", vBest);
 	return 0;
 }
 
