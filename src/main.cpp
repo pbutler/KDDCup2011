@@ -25,29 +25,30 @@ using namespace std;
 using namespace __gnu_cxx;
 
 //**START PARAMS
-double artistStep = 0.00978125;
-double itemReg = 0.004;
-double decay = 0.553005;
-double itemStep = 0.0245;
-double artistReg = 2.19303;
-double genreReg = 2.84698;
-double userReg = 0.132063;
-double userStep = 1.21402;
-double albumStep = 0.00028125;
-double albumReg = 1.32385;
-double genreStep = 0.0482402;
-
+double artistStep = 0.0550822;
+double itemReg = 0.00991796;
+double itemStep = 0.0133056;
+double decay = 0.499984;
+double artistReg = 2.22105;
+double genreReg = 2.87483;
+double userReg = 0.131461;
+double userStep = 1.1487;
+double albumStep = 0.000112683;
+double albumReg = 1.29896;
+double genreStep = 0.155072;
 //**END PARAMS
 
-double decaypq = 1.; //.99;
-double itemStep2	= itemStep;
-double userStep2	= userStep; //.5;
-//make sep. Steps for phase 2
 
-double pStep		= .001;
-double pReg		=  1.0;
-double qStep		= .001;
-double qReg		=  1.0;
+double pStep = 0.0204848;
+double decaypq = 0.734298;
+double qStep = 0.000876522;
+double albumStep2 = 0.0327189434601;
+double pReg = 0.560498915047;
+double qReg = 2.08076132658;
+double decay2 = 0.682039876166;
+double itemStep2 = 0.0125042784087;
+double artistStep2 = 0.0133653874299;
+double userStep2 = 0.517686752997;
 
 double xStep		= 1e-6;
 double xReg		= .05;
@@ -715,7 +716,7 @@ void *train_model(void *ptr = NULL) {
 
 				if(item.albumid > -1) {
 #ifdef BIASA
-					bal[item.albumid] += albumStep*(err - albumReg*bal[item.albumid]);
+					bal[item.albumid] += albumStep2*(err - albumReg*bal[item.albumid]);
 #endif //BIASA
 #ifdef LATENTA
 					for(int f = 0; f < nFeatures; f++) {
@@ -729,7 +730,7 @@ void *train_model(void *ptr = NULL) {
 				}
 				if(item.artistid > -1) {
 #ifdef BIASA
-					bar[item.artistid] += artistStep*(err - artistReg*bar[item.artistid]);
+					bar[item.artistid] += artistStep2*(err - artistReg*bar[item.artistid]);
 #endif //BIASA
 #ifdef LATENTA
 					for(int f = 0; f < nFeatures; f++) {
@@ -785,8 +786,8 @@ void *train_model(void *ptr = NULL) {
 			qStep *= decaypq;
 			xStep *= decay;
 			yStep *= decay;
-			userStep2 *= decay;
-			itemStep2 *= decay;
+			userStep2 *= decay2;
+			itemStep2 *= decay2;
 			faults = 0;
 		}
 		lasterr = verr;
@@ -1183,6 +1184,13 @@ void read_params(void)
 		READSET(qMax);
 		READSET(xMax);
 		READSET(yMax);
+
+		READSET(decaypq);
+		READSET(itemStep2 );
+		READSET(userStep2);
+		READSET(artistStep2);
+		READSET(albumStep2);
+		READSET(decay2);
 		if (!set) {
 			fprintf(stdout, "OOPS! param notfound %s\n", name);
 		} else {

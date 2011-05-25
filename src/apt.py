@@ -8,6 +8,7 @@ Python source code - replace this with a description of the code and write the c
 __author__ = 'Patrick Butler'
 __email__  = 'pbutler@killertux.org'
 
+import sys
 import os
 import subprocess
 import random
@@ -79,19 +80,13 @@ class GAPT(object):
 
     def mate(self, babymama):
         babygenes = {}
-        if random.random() > .5:
-            avg = True
-        else:
-            avg = False
+        babygenes2 = {}
+
         for k in self.genes:
-            if avg:
-                babygenes[k] = (self.genes[k] + babymama.genes[k]) /2.
-            else:
-                if random.random() > .5:
-                    babygenes[k] = self.genes[k]
-                else:
-                   babygenes[k] = babymama.genes[k]
-        return GAPT(babygenes)
+            p = random.random()
+            babygenes[k] = p*self.genes[k]+ (1.-p)*babymama.genes[k]
+            babygenes2[k] = (1.-p)*self.genes[k]+ p*babymama.genes[k]
+        return [ GAPT(babygenes), GAPT(babygenes2)]
 
     def evaluate(self):
         if self.valuation is not None:
@@ -104,7 +99,7 @@ class GAPT(object):
         for k in self.genes:
             file.write("%s=%g\n" %(k, self.genes[k]))
         file.close()
-        results = subprocess.Popen(["../src/main","-P", "-m", ],stdout=subprocess.PIPE).communicate()[0]
+        results = subprocess.Popen(["../src/main","-P", "-m", "-t" ],stdout=subprocess.PIPE).communicate()[0]
         #print results
         os.chdir(curdir)
         vrmsere = re.compile(r"Best is ([-e0-9.]+)")
@@ -121,7 +116,9 @@ class GAPT(object):
                     minval = val
                 minval = val
         self.valuation = minval
-        return val
+        print minval,
+        sys.stdout.flush()
+        return minval
 
     def mutate(self, n = None):
         if n is None:
@@ -131,13 +128,16 @@ class GAPT(object):
         n = len(self.genes)
         keys = random.sample(self.genes.keys(), n)
         for k in keys:
-            m = 10**int(random.random()*3+1)
+            m = 10**int(random.random()*3+2)
             r= int(random.normalvariate(0, 10./3)) / float(m)
             if r == 0:
                 r = 2*int(random.random()-.5) / float(m)
             self.genes[k] += r
             if self.genes[k] <= 0:
                 self.genes[k] = int(1+100*random.random()) / 1000.
+
+            if k.startswith("decay") and self.genes[k] >= 1.:
+                self.genes[k] = random.random() /4. + .5
             #if k == "itemStep":
             #    self.genes[k] += int((random.random()-.5)*100)/10000.
             #else:
@@ -168,7 +168,7 @@ class GAPT(object):
 
 def selectWithProb(l):
     #return int( len(l)*random.random() )
-    l = [ 1./i for i in range(1,1+len(l)) ]
+    l = [ 1./(i*i) for i in range(1,1+len(l)) ]
     all = sum(l)
     r = random.random()*all
     a = 0
@@ -190,7 +190,7 @@ def cull(population, maxpop):
 def foo(p):
     return p.evaluate(), p
 
-def runGA(pop = 100, keep = 20, mrate = .7, runs = 100):
+def runGA(pop = 50, noffspring = 20, mrate = .3, runs = 100):
     population = [ GAPT() for i in range(pop)]
 
     #pool = Pool(4)
@@ -203,7 +203,6 @@ def runGA(pop = 100, keep = 20, mrate = .7, runs = 100):
             ranks = map(foo, population) # for p in population ]
             #ranks = pool.map(foo, population) # for p in population ]
             ranks.sort()
-            ranks[:keep]
 
             population = [ p for e,p in ranks]
             fits = [ e for e,p in ranks]
@@ -211,12 +210,12 @@ def runGA(pop = 100, keep = 20, mrate = .7, runs = 100):
             #breed
             offspring = []
 
-            for i in range(pop - keep): #en(population)):
+            for i in range(noffspring):
                 mom, dad = selectWithProb(fits), selectWithProb(fits)
                 while mom == dad:
                     mom, dad = selectWithProb(fits), selectWithProb(fits)
                 #print mom, dad
-                offspring += [ population[dad].mate(population[mom]) ]
+                offspring += population[dad].mate(population[mom])
                 #print population[mom]
                 #print population[dad]
                 #print offspring[-1]
@@ -228,18 +227,21 @@ def runGA(pop = 100, keep = 20, mrate = .7, runs = 100):
 
             #merge
             population += offspring
-
+            print "--",
             #cull
-            ranks = [ (p.evaluate(), p ) for p in population ]
+            ranks = [ foo(p) for p in population ]
             ranks.sort()
             ranks = ranks[:pop]
-            print ", ".join( map(str, [ e for e,p in ranks]))
+            population = [ p for e,p in ranks]
+            print
+            #print ", ".join( map(str, [ e for e,p in ranks]))
 
             if best is None or (ranks[0][0] < bestN):
                 best = ranks[0][1].copy()
                 bestN = ranks[0][0]
             print "Best in run",run,"is",bestN
             print best
+
     except KeyboardInterrupt:
         pass
     return bestN, best
