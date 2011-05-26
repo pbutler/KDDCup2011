@@ -25,30 +25,30 @@ using namespace std;
 using namespace __gnu_cxx;
 
 //**START PARAMS
-double artistStep = 0.0550822;
-double itemReg = 0.00991796;
-double itemStep = 0.0133056;
-double decay = 0.499984;
-double artistReg = 2.22105;
-double genreReg = 2.87483;
-double userReg = 0.131461;
-double userStep = 1.1487;
-double albumStep = 0.000112683;
-double albumReg = 1.29896;
-double genreStep = 0.155072;
+double artistStep = 0.055646;
+double itemReg = 0.00565271;
+double itemStep = 0.013813;
+double decay = 0.491423;
+double artistReg = 2.04547;
+double genreReg = 2.99059;
+double userReg = 0.134079;
+double userStep = 1.1473;
+double albumStep = 2.02387e-05;
+double albumReg = 1.25981;
+double genreStep = 0.171549;
 //**END PARAMS
 
+double pStep = 0.016584;
+double albumStep2 = 0.0797187;
+double userStep2 = 0.577641;
+double qReg = 2.22854;
+double decay2 = 0.63366;
+double decaypq = 0.999571;
+double itemStep2 = 0.0146559;
+double artistStep2 = 0.0321705;
+double pReg = 0.429872;
+double qStep = 0.000733085;
 
-double pStep = 0.0204848;
-double decaypq = 0.734298;
-double qStep = 0.000876522;
-double albumStep2 = 0.0327189434601;
-double pReg = 0.560498915047;
-double qReg = 2.08076132658;
-double decay2 = 0.682039876166;
-double itemStep2 = 0.0125042784087;
-double artistStep2 = 0.0133653874299;
-double userStep2 = 0.517686752997;
 
 double xStep		= 1e-6;
 double xReg		= .05;
