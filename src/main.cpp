@@ -19,36 +19,47 @@
 #define BIASESA 1
 #define LATENT 1
 #define LATENTA 1
-
+#define LATENTG 1
 
 using namespace std;
 using namespace __gnu_cxx;
 
+double userReg = 0.13;
+double userStep = 1.14;
+double genreStep = 0.17;
 //**START PARAMS
-double artistStep = 0.055646;
-double itemReg = 0.00565271;
-double itemStep = 0.013813;
-double decay = 0.491423;
-double artistReg = 2.04547;
-double genreReg = 2.99059;
-double userReg = 0.134079;
-double userStep = 1.1473;
-double albumStep = 2.02387e-05;
-double albumReg = 1.25981;
-double genreStep = 0.171549;
+double genreReg = 3.0561;
+double pgReg = 0.442766;
+double pgStep = 0.00085207;
+double qgStep = 0.000294376;
+double genreStep2 = 0.0114211;
+double qgReg = 0.734789;
 //**END PARAMS
-
-double pStep = 0.016584;
-double albumStep2 = 0.0797187;
-double userStep2 = 0.577641;
-double qReg = 2.22854;
-double decay2 = 0.63366;
-double decaypq = 0.999571;
-double itemStep2 = 0.0146559;
+double itemStep2 = 0.0155421;
+double pReg = 0.425455;
+double userStep2 = 0.563456;
+double albumStep = 2.02387e-05;
+double albumReg = 1.25728;
+double pArReg = 0.362286;
+double albumStep2 = 0.0741927;
+double itemReg = 0.00569966;
+double decay = 0.488221;
+double qAlReg = 2.15638;
+double decaypq = 0.927985;
 double artistStep2 = 0.0321705;
-double pReg = 0.429872;
-double qStep = 0.000733085;
-
+double pAlReg = 0.376144;
+double pAlStep = 0.0504965;
+double pStep = 0.0156941;
+double itemStep = 0.0135704;
+double artistStep = 0.0468871;
+double artistReg = 2.06985;
+double pArStep = 0.00611516;
+double qReg = 2.21387;
+double decay2 = 0.633283;
+double qAlStep = 0.000952044;
+double qArReg = 2.1846;
+double qStep = 0.00127863;
+double qArStep = 0.0010764;
 
 double xStep		= 1e-6;
 double xReg		= .05;
@@ -65,12 +76,6 @@ double qMin = -1 * qMax;
 double xMin = -1 * xMax;
 double yMin = -1 * yMax;
 
-
-double pArStep = 0.005;
-double pArReg = .01;
-
-double pAlStep = 0.005;
-double pAlReg = .01;
 
 #define NUM_THREADS 1
 #define SCORENORM  1.f
@@ -145,7 +150,7 @@ unsigned int umaplen = 0,imaplen = 0;
 hash_map<int, int> imap;
 hash_map<int, int> umap;
 double *bu, *bi, *p, *x, *y, *q, *bg, *bal, *bar;
-double *pAl, *pAr, *qAl, *qAr;
+double *pAl, *pAr, *qAl, *qAr, *pg, *qg;
 struct rating_s *ratings;
 struct item_s *items;
 struct user_s *users;
@@ -249,6 +254,8 @@ void load_model()
 	x = (double*)open_rw("tmp/x.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
 	y = (double*)open_rw("tmp/y.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
 
+	pg = (double *)open_rw("tmp/pG.mmap", sizeof(double)*nFeatures*nUsers);
+	qg = (double*)open_rw("tmp/qG.mmap", sizeof(double)*nFeatures*nGenres, MADV_RANDOM);
 	pAl = (double *)open_rw("tmp/pAl.mmap", sizeof(double)*nFeatures*nUsers);
 	qAl = (double*)open_rw("tmp/qAl.mmap", sizeof(double)*nFeatures*nAlbums, MADV_RANDOM);
 	pAr = (double *)open_rw("tmp/pAr.mmap", sizeof(double)*nFeatures*nUsers);
@@ -294,9 +301,14 @@ void *init_model(void *ptr = NULL) {
 #ifdef BIASESG
 				pair<multimapII::const_iterator, multimapII::const_iterator> p =
 					genreItemMap.equal_range(rating.item);
+				double ag = 0;
+				int ng = 0;
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
-					pred += bg[(*i).second];
+					ag += bg[(*i).second];
+					ng++;
 				}
+				if(ng > 0)
+					pred += ag / (double) ng;
 #endif
 #ifdef BIASESA
 				if(item.artistid > -1) {
@@ -316,7 +328,7 @@ void *init_model(void *ptr = NULL) {
 #ifdef BIASESG
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					int gid = (*i).second;
-					bg[gid] += genreStep*(err - genreReg*bg[gid]);
+					bg[gid] += genreStep*(err - genreReg*bg[gid]/ (double) ng);
 				}
 #endif //BIASESG
 #ifdef BIASESA
@@ -352,10 +364,14 @@ void *init_model(void *ptr = NULL) {
 					genreItemMap.equal_range(rating.item);
 				//printf("%g %g %g %d ", mu, bu[u], bi[rating.item],rating.item);
 #ifdef BIASESG
+				int ng = 0; double ag = 0;
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					int gid = (*i).second;
-					pred += bg[gid];
+					ag += bg[gid];
+					ng++;
 				}
+				if(ng > 0)
+					pred += ag / (double)ng;
 #endif //BIASESG
 #ifdef BIASESA
 				if(item.artistid > -1) {
@@ -403,8 +419,12 @@ void *init_model(void *ptr = NULL) {
 		p[i] = randF(pMin, pMax) * sqnF;
 		pAl[i] = randF(pMin, pMax) * sqnF;
 		pAr[i] = randF(pMin, pMax) * sqnF;
+		pg[i] = randF(pMin, pMax) * sqnF;
 	}
 
+	for(int i = rank; i < nGenres*nFeatures;i+=NUM_THREADS) {
+		qg[i] = randF(qMin, qMax) * sqnF;
+	}
 	for(int i = rank; i < nAlbums*nFeatures;i+=NUM_THREADS) {
 		qAl[i] = randF(qMin, qMax) * sqnF;
 	}
@@ -469,37 +489,57 @@ inline double predict(int uid, int iid, bool print = false)
 	if(print)
 		printf("bu/i: %g %g %g\n", mu, bu[uid], bi[iid]);
 #endif //BIASES
-#ifdef BIASESG
-	bool goprint = false;
 	pair<multimapII::const_iterator, multimapII::const_iterator> gp =
 		genreItemMap.equal_range(iid);
+#ifdef BIASESG
+	bool goprint = false;
+	int ng = 0; double ag = 0;
 	for (multimapII::const_iterator i = gp.first; i != gp.second; ++i) {
 		int gid = (*i).second;
 		if (!goprint && print) {
 			printf("bg: ");
 		}
 		goprint = true;
-		sum += bg[gid];
+		ag += bg[gid];
+		ng++;
 		if(print)
 			printf("%g ", bg[gid]);
 	}
+	if (ng > 0)
+		sum += ag /(double)ng;
 	if(print && goprint)
 		printf("\n");
 #endif //BIASESG
 	double apq = 0;
 #ifdef LATENT
 	for(int f = 0; f < nFeatures; f++) {
-		if (print )
+		/*if (print )
 			printf("pq: %g %g %g\n",
 				       	p[uid*nFeatures+f],
 					q[iid*nFeatures+f],
 					q[iid*nFeatures+f] * p[uid*nFeatures+f]);
+					*/
 		apq += CLAMP2(q[iid*nFeatures+f] * p[uid*nFeatures+f]);
 	}
 	sum += apq;
 	if(print)
 		printf("pqT: %g\n", apq);
 #endif //LATENT
+#ifdef LATENTG
+	apq = 0;
+	int pqig = 0;
+	for (multimapII::const_iterator i = gp.first; i != gp.second; ++i) {
+		int gid = (*i).second;
+		for(int f= 0; f < nFeatures; f++) {
+			apq += pg[uid*nFeatures + f]*qg[gid*nFeatures + f];
+		}
+		pqig++;
+	}
+	if(print)
+		printf("Gpq: %g\n", apq);
+	if (pqig >0)
+		sum += apq / (double) pqig;
+#endif //LATENTG
 #ifdef LATENTA
 	apq = 0;
 	if(item.albumid > -1) {
@@ -714,31 +754,50 @@ void *train_model(void *ptr = NULL) {
 				bi[rating.item] += itemStep2*(err - itemReg*tmpbi);
 #endif //BIASES
 
+				pair<multimapII::const_iterator, multimapII::const_iterator> p =
+					genreItemMap.equal_range(rating.item);
+				double ng = genreItemMap.count(rating.item);
+				if (ng > 0)
+				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
+					int g = (*i).second;
+#ifdef BIASESG
+					bg[g] += genreStep2*(err - genreReg*bg[g]/ ng);
+#endif //BIASESG
+#ifdef LATENTG
+					for(int f = 0; f < nFeatures; f++) {
+						int iif = g*nFeatures+f;
+						double tmpq = qg[iif];
+						double tmpp = pg[uf+f];
+						qg[iif] += qgStep*(err*tmpp - qgReg*tmpq/ng);
+						pg[uf+f] += pgStep*(err*tmpq - pgReg*tmpp/ng);
+					}
+#endif //BIASESG
+				}
 				if(item.albumid > -1) {
-#ifdef BIASA
+#ifdef BIASESA
 					bal[item.albumid] += albumStep2*(err - albumReg*bal[item.albumid]);
-#endif //BIASA
+#endif //BIASES A
 #ifdef LATENTA
 					for(int f = 0; f < nFeatures; f++) {
 						int iif = item.albumid*nFeatures+f;
 						double tmpq = qAl[iif];
 						double tmpp = pAl[uf+f];
-						qAl[iif] += qStep*(err*tmpp - qReg*tmpq);
-						pAl[uf+f] += pStep*(err*tmpq - pReg*tmpp);
+						qAl[iif] += qAlStep*(err*tmpp - qAlReg*tmpq);
+						pAl[uf+f] += pAlStep*(err*tmpq - pAlReg*tmpp);
 					}
 #endif // LATENTA
 				}
 				if(item.artistid > -1) {
-#ifdef BIASA
+#ifdef BIASESA
 					bar[item.artistid] += artistStep2*(err - artistReg*bar[item.artistid]);
-#endif //BIASA
+#endif //BIAESSA
 #ifdef LATENTA
 					for(int f = 0; f < nFeatures; f++) {
 						int iif = item.artistid*nFeatures+f;
 						double tmpq = qAr[iif];
 						double tmpp = pAr[uf+f];
-						qAr[iif] += qStep*(err*tmpp - qReg*tmpq);
-						pAr[uf+f] += pStep*(err*tmpq - pReg*tmpp);
+						qAr[iif] += qArStep*(err*tmpp - qArReg*tmpq);
+						pAr[uf+f] += pArStep*(err*tmpq - pArReg*tmpp);
 					}
 #endif //LATENTA
 				}
@@ -1170,6 +1229,7 @@ void read_params(void)
 
 		READSET(userStep2);
 		READSET(itemStep2);
+		READSET(genreStep2);
 		READSET(pStep);
 		READSET(pReg);
 		READSET(qStep);
@@ -1185,7 +1245,22 @@ void read_params(void)
 		READSET(xMax);
 		READSET(yMax);
 
+		READSET(pAlStep);
+		READSET(pAlReg);
+		READSET(qAlStep);
+		READSET(qAlReg);
+
+		READSET(pArStep);
+		READSET(pArReg);
+		READSET(qArStep);
+		READSET(qArReg);
+
+		READSET(pgStep);
+		READSET(pgReg);
+		READSET(qgStep);
+		READSET(qgReg);
 		READSET(decaypq);
+
 		READSET(itemStep2 );
 		READSET(userStep2);
 		READSET(artistStep2);

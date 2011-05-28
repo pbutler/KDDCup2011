@@ -99,7 +99,7 @@ class GAPT(object):
         for k in self.genes:
             file.write("%s=%g\n" %(k, self.genes[k]))
         file.close()
-        results = subprocess.Popen(["../src/main","-P", "-m", "-t" ],stdout=subprocess.PIPE).communicate()[0]
+        results = subprocess.Popen(["../src/main","-P", "-m", "-t"],stdout=subprocess.PIPE).communicate()[0]
         #print results
         os.chdir(curdir)
         vrmsere = re.compile(r"Best is ([-e0-9.]+)")
@@ -125,7 +125,7 @@ class GAPT(object):
             w = len(self.genes) / 2.
             n = random.normalvariate(2*w/3., w/2)
             n = int(min(max(1, n), len(self.genes)))
-        n = len(self.genes)
+        n = 1 #len(self.genes)
         keys = random.sample(self.genes.keys(), n)
         for k in keys:
             m = 10**int(random.random()*3+2)
@@ -190,7 +190,7 @@ def cull(population, maxpop):
 def foo(p):
     return p.evaluate(), p
 
-def runGA(pop = 50, noffspring = 20, mrate = .3, runs = 100):
+def runGA(pop = 50, noffspring = 20, mrate = .5, runs = 100):
     population = [ GAPT() for i in range(pop)]
 
     #pool = Pool(4)
