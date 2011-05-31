@@ -18,37 +18,39 @@
 #define BIASESG 1
 #define BIASESA 1
 #define LATENT 1
-#define LATENTA 1
+#define LATENTAL 1
+#define LATENTAR 1
 #define LATENTG 1
 
 using namespace std;
 using namespace __gnu_cxx;
 
-double userReg = 0.13;
-double userStep = 1.14;
-double genreStep = 0.17;
-//**START PARAMS
-double genreReg = 3.0561;
-double pgReg = 0.442766;
+double userReg = 0.105838;
+double userStep = 1.19006;
+double genreStep = 0.0009;
+double genreReg = 1.16371;
+double pgReg = 0.411812;
 double pgStep = 0.00085207;
-double qgStep = 0.000294376;
-double genreStep2 = 0.0114211;
-double qgReg = 0.734789;
-//**END PARAMS
+double qgStep = 0.00024017;
+double qgReg = 0.430303;
+double genreStep2 = 0.00026439;
 double itemStep2 = 0.0155421;
 double pReg = 0.425455;
 double userStep2 = 0.563456;
-double albumStep = 2.02387e-05;
-double albumReg = 1.25728;
-double pArReg = 0.362286;
+double albumStep = .001;
+double albumReg = 0.25728;
+//**START PARAMS
+double qAlReg = 0.15637 / 10;
+double pAlReg = 0.376144 / 10;
+double pAlStep = 0.0504965 / 10;
+double qAlStep = 0.000952044 / 10;
 double albumStep2 = 0.0741927;
+//**END PARAMS
+double pArReg = 0.362286;
 double itemReg = 0.00569966;
 double decay = 0.488221;
-double qAlReg = 2.15638;
 double decaypq = 0.927985;
 double artistStep2 = 0.0321705;
-double pAlReg = 0.376144;
-double pAlStep = 0.0504965;
 double pStep = 0.0156941;
 double itemStep = 0.0135704;
 double artistStep = 0.0468871;
@@ -56,8 +58,7 @@ double artistReg = 2.06985;
 double pArStep = 0.00611516;
 double qReg = 2.21387;
 double decay2 = 0.633283;
-double qAlStep = 0.000952044;
-double qArReg = 2.1846;
+double qArReg = 1.1846;
 double qStep = 0.00127863;
 double qArStep = 0.0010764;
 
@@ -302,13 +303,10 @@ void *init_model(void *ptr = NULL) {
 				pair<multimapII::const_iterator, multimapII::const_iterator> p =
 					genreItemMap.equal_range(rating.item);
 				double ag = 0;
-				int ng = 0;
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					ag += bg[(*i).second];
-					ng++;
 				}
-				if(ng > 0)
-					pred += ag / (double) ng;
+				pred += ag;// / (double) ng;
 #endif
 #ifdef BIASESA
 				if(item.artistid > -1) {
@@ -328,7 +326,7 @@ void *init_model(void *ptr = NULL) {
 #ifdef BIASESG
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					int gid = (*i).second;
-					bg[gid] += genreStep*(err - genreReg*bg[gid]/ (double) ng);
+					bg[gid] += genreStep*(err - genreReg*bg[gid]); /// (double) ng);
 				}
 #endif //BIASESG
 #ifdef BIASESA
@@ -364,14 +362,12 @@ void *init_model(void *ptr = NULL) {
 					genreItemMap.equal_range(rating.item);
 				//printf("%g %g %g %d ", mu, bu[u], bi[rating.item],rating.item);
 #ifdef BIASESG
-				int ng = 0; double ag = 0;
+				double ag = 0;
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					int gid = (*i).second;
 					ag += bg[gid];
-					ng++;
 				}
-				if(ng > 0)
-					pred += ag / (double)ng;
+				pred += ag;// / (double)ng;
 #endif //BIASESG
 #ifdef BIASESA
 				if(item.artistid > -1) {
@@ -413,7 +409,7 @@ void *init_model(void *ptr = NULL) {
 
 	if (rank == 0)
 		printf("Best is %lf\n", vBest);
-#if defined(LATENT) || defined(LATENTA)
+#if defined(LATENT) || defined(LATENTAR) || defined(LATENTAL)
 	double sqnF = 1./sqrt(nFeatures);
 	for(int i = rank; i < nUsers*nFeatures;i += NUM_THREADS) {
 		p[i] = randF(pMin, pMax) * sqnF;
@@ -482,6 +478,8 @@ inline double predict(int uid, int iid, bool print = false)
 {
 	struct item_s item = items[iid];
 	double sum = 0;
+#if defined(BIASESG) || defined(LATENTG)
+#endif
 	if (print)
 		printf("\n\n");
 #ifdef BIASES
@@ -493,7 +491,7 @@ inline double predict(int uid, int iid, bool print = false)
 		genreItemMap.equal_range(iid);
 #ifdef BIASESG
 	bool goprint = false;
-	int ng = 0; double ag = 0;
+	double ag = 0;
 	for (multimapII::const_iterator i = gp.first; i != gp.second; ++i) {
 		int gid = (*i).second;
 		if (!goprint && print) {
@@ -501,12 +499,10 @@ inline double predict(int uid, int iid, bool print = false)
 		}
 		goprint = true;
 		ag += bg[gid];
-		ng++;
 		if(print)
 			printf("%g ", bg[gid]);
 	}
-	if (ng > 0)
-		sum += ag /(double)ng;
+	sum += ag; // /(double)ng;
 	if(print && goprint)
 		printf("\n");
 #endif //BIASESG
@@ -527,30 +523,29 @@ inline double predict(int uid, int iid, bool print = false)
 #endif //LATENT
 #ifdef LATENTG
 	apq = 0;
-	int pqig = 0;
 	for (multimapII::const_iterator i = gp.first; i != gp.second; ++i) {
 		int gid = (*i).second;
 		for(int f= 0; f < nFeatures; f++) {
 			apq += pg[uid*nFeatures + f]*qg[gid*nFeatures + f];
 		}
-		pqig++;
 	}
 	if(print)
 		printf("Gpq: %g\n", apq);
-	if (pqig >0)
-		sum += apq / (double) pqig;
+	sum += apq; // / ng;
 #endif //LATENTG
-#ifdef LATENTA
+#ifdef LATENTAL
 	apq = 0;
 	if(item.albumid > -1) {
 		sum += bal[item.albumid];
 		for(int f = 0; f < nFeatures; f++) {
-			apq += CLAMP2(qAl[item.albumid*nFeatures+f] * pAl[uid*nFeatures+f]);
+			apq += CLAMP2(qAl[item.albumid*nFeatures+f]*pAl[uid*nFeatures+f]);
 		}
 	}
 	sum += apq;
 	if(print)
 		printf("Alpq: %g\n", apq);
+#endif //LATENTAL
+#ifdef LATENTAR
 	apq = 0;
 	if(item.artistid > -1) {
 		sum += bar[item.artistid];
@@ -561,7 +556,7 @@ inline double predict(int uid, int iid, bool print = false)
 	sum += apq;
 	if(print)
 		printf("Arpq: %g\n", apq);
-#endif //LATENT
+#endif //LATENTAL
 	if(print)
 		printf("%g --> ", sum);
 	return CLAMP(sum);
@@ -756,20 +751,18 @@ void *train_model(void *ptr = NULL) {
 
 				pair<multimapII::const_iterator, multimapII::const_iterator> p =
 					genreItemMap.equal_range(rating.item);
-				double ng = genreItemMap.count(rating.item);
-				if (ng > 0)
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
 					int g = (*i).second;
 #ifdef BIASESG
-					bg[g] += genreStep2*(err - genreReg*bg[g]/ ng);
+					bg[g] += genreStep2*(err - genreReg*bg[g]); /// ng);
 #endif //BIASESG
 #ifdef LATENTG
 					for(int f = 0; f < nFeatures; f++) {
 						int iif = g*nFeatures+f;
 						double tmpq = qg[iif];
 						double tmpp = pg[uf+f];
-						qg[iif] += qgStep*(err*tmpp - qgReg*tmpq/ng);
-						pg[uf+f] += pgStep*(err*tmpq - pgReg*tmpp/ng);
+						qg[iif] += qgStep*(err*tmpp - qgReg*tmpq); // /ng);
+						pg[uf+f] += pgStep*(err*tmpq - pgReg*tmpp); // /ng);
 					}
 #endif //BIASESG
 				}
@@ -777,13 +770,13 @@ void *train_model(void *ptr = NULL) {
 #ifdef BIASESA
 					bal[item.albumid] += albumStep2*(err - albumReg*bal[item.albumid]);
 #endif //BIASES A
-#ifdef LATENTA
+#ifdef LATENTAL
 					for(int f = 0; f < nFeatures; f++) {
 						int iif = item.albumid*nFeatures+f;
 						double tmpq = qAl[iif];
 						double tmpp = pAl[uf+f];
-						qAl[iif] += qAlStep*(err*tmpp - qAlReg*tmpq);
-						pAl[uf+f] += pAlStep*(err*tmpq - pAlReg*tmpp);
+						qAl[iif]+= qAlStep*(err*tmpp - qAlReg*tmpq);
+						pAl[uf+f]+= pAlStep*(err*tmpq - pAlReg*tmpp);
 					}
 #endif // LATENTA
 				}
@@ -791,7 +784,7 @@ void *train_model(void *ptr = NULL) {
 #ifdef BIASESA
 					bar[item.artistid] += artistStep2*(err - artistReg*bar[item.artistid]);
 #endif //BIAESSA
-#ifdef LATENTA
+#ifdef LATENTAR
 					for(int f = 0; f < nFeatures; f++) {
 						int iif = item.artistid*nFeatures+f;
 						double tmpq = qAr[iif];
@@ -1030,21 +1023,19 @@ void read_albumData()
 		albumid = atoi(strtok(buf, "|"));
 		albumMap[albumid] = aid;
 
-		if(imap.count(albumid) == 0 )
-			continue;
-		int iid = imap[albumid];
-		cur = strtok(NULL, "|");
+		if (imap.count(albumid) != 0) {
+			int iid = imap[albumid];
+			cur = strtok(NULL, "|");
 
-		items[iid].albumid = aid;
-		if (cur[0] == 'N') {
-			items[iid].artistid = -1;
-		} else {
-			items[iid].artistid = artistMap[atoi(cur)];
-		}
-		while( (cur = strtok(NULL, "|")) != NULL) {
-			int value = atoi(cur);
-			int gid = genreMap[value];
-			genreItemMap.insert(hash_multimap<int,int>::value_type(iid, gid));
+			items[iid].albumid = aid;
+			if (cur[0] != 'N') {
+				items[iid].artistid = artistMap[atoi(cur)];
+			}
+			while( (cur = strtok(NULL, "|")) != NULL) {
+				int value = atoi(cur);
+				int gid = genreMap[value];
+				genreItemMap.insert(hash_multimap<int,int>::value_type(iid, gid));
+			}
 		}
 		aid++;
 	}
@@ -1068,16 +1059,12 @@ void read_trackData()
 		int iid = imap[trackid];
 		items[iid].type = TRACK;
 		cur = strtok(NULL, "|");
-		if (cur[0] == 'N') {
-			items[iid].albumid = -1;
-		} else {
+		if (cur[0] != 'N') {
 			albumid = atoi(cur);
 			items[iid].albumid = albumMap[albumid];
 		}
 		cur = strtok(NULL, "|");
-		if (cur[0] == 'N') {
-			items[iid].artistid = -1;
-		} else {
+		if (cur[0] != 'N') {
 			artistid = atoi(cur);
 			items[iid].artistid = artistMap[artistid];
 		}
@@ -1115,13 +1102,13 @@ void read_artists()
 	while(! feof(fp) ) {
 		fscanf(fp, "%d\n", &value);
 		if(feof(fp)) break;
-		if(imap.count(value) == 0)
-			continue;
-		int iid = imap[value];
-		items[iid].type = ARTIST;
 		artistMap[value] = aid;
-		items[iid].artistid = aid;
-		items[iid].albumid = -1;
+		if(imap.count(value) != 0) {
+			int iid = imap[value];
+			items[iid].type = ARTIST;
+			items[iid].artistid = aid;
+			items[iid].albumid = -1;
+		}
 		aid++;
 	}
 }

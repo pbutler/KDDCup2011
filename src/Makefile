@@ -6,4 +6,4 @@ svd.so: svd.pyx
 	python setup.py build_ext -i
 
 clean:
-	rm -f svd.so svd.c
+	rm -f svd.so svd.c main *.o

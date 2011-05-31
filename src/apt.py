@@ -104,21 +104,17 @@ class GAPT(object):
         os.chdir(curdir)
         vrmsere = re.compile(r"Best is ([-e0-9.]+)")
         val = 0
-        minval = None
         for line in results.strip().split("\n"):
             if "nan" in line:
-                minval = 10000000.
+                val = 10000000.
                 break
             match = vrmsere.search(line)
             if match:
                 val = float( match.group(1))
-                if minval is None or val < minval :
-                    minval = val
-                minval = val
-        self.valuation = minval
-        print minval,
+        self.valuation = val
+        print val,
         sys.stdout.flush()
-        return minval
+        return val
 
     def mutate(self, n = None):
         if n is None:
