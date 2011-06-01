@@ -40,11 +40,11 @@ double userStep2 = 0.563456;
 double albumStep = .001;
 double albumReg = 0.25728;
 //**START PARAMS
-double qAlReg = 0.15637 / 10;
-double pAlReg = 0.376144 / 10;
-double pAlStep = 0.0504965 / 10;
-double qAlStep = 0.000952044 / 10;
-double albumStep2 = 0.0741927;
+double pAlReg = 0.829157;
+double qAlReg = 0.497772;
+double qAlStep = 0.0152342;
+double pAlStep = 6.66636e-05;
+double albumStep2 = 5.85025e-05;
 //**END PARAMS
 double pArReg = 0.362286;
 double itemReg = 0.00569966;
