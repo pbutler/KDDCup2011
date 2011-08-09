@@ -8,11 +8,13 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <ext/hash_map>
 #include <pthread.h>
 #include "barrier.h"
-#include <sys/time.h>
 #include <assert.h>
+
+#include "benchmark.h"
+#include "data.h"
+#include "allmodels.h"
 
 #define BIASES 1
 #define BIASESG 1
@@ -22,45 +24,48 @@
 #define LATENTAR 1
 #define LATENTG 1
 
+#define NBINIT 70
+#define ITBIN(x) ( x / 57)
+
 using namespace std;
 using namespace __gnu_cxx;
 
-double userReg = 0.105838;
-double userStep = 1.19006;
-double genreStep = 0.0009;
-double genreReg = 1.16371;
-double pgReg = 0.411812;
-double pgStep = 0.00085207;
-double qgStep = 0.00024017;
-double qgReg = 0.430303;
-double genreStep2 = 0.00026439;
-double itemStep2 = 0.0155421;
-double pReg = 0.425455;
-double userStep2 = 0.563456;
-double albumStep = .001;
-double albumReg = 0.25728;
 //**START PARAMS
-double pAlReg = 0.829157;
-double qAlReg = 0.497772;
-double qAlStep = 0.0152342;
-double pAlStep = 6.66636e-05;
-double albumStep2 = 5.85025e-05;
-//**END PARAMS
-double pArReg = 0.362286;
-double itemReg = 0.00569966;
-double decay = 0.488221;
-double decaypq = 0.927985;
-double artistStep2 = 0.0321705;
-double pStep = 0.0156941;
+double decay = 0.7;
+double decaypq = 0.9;
+double decay2 = 0.8;
+double userStep = 1.19006;
 double itemStep = 0.0135704;
+double genreStep = 0.0009;
+double albumStep = .001;
 double artistStep = 0.0468871;
-double artistReg = 2.06985;
-double pArStep = 0.00611516;
-double qReg = 2.21387;
-double decay2 = 0.633283;
-double qArReg = 1.1846;
-double qStep = 0.00127863;
-double qArStep = 0.0010764;
+double userReg = 1;
+double itemReg = 1;
+double genreReg = 1.;
+double albumReg = .5;
+double artistReg = 1.5;
+double itemStep2 = .015;
+double userStep2 = .06;
+double genreStep2 = .001;
+double albumStep2 = .003;
+double artistStep2 = .03;
+double pStep = .02;
+double qStep =.001;
+double pReg = 1;
+double qReg = 1;
+double pArStep = .006;
+double qArStep = .001;
+double pArReg = .5;
+double qArReg = 1.2;
+double pAlStep = .001;
+double qAlStep = .02;
+double pAlReg = 1;
+double qAlReg = 1;
+double pgStep = .003;
+double qgStep = .001;
+double pgReg = 0.5;
+double qgReg = 0.5;
+//**END PARAMS
 
 double xStep		= 1e-6;
 double xReg		= .05;
@@ -79,85 +84,23 @@ double yMin = -1 * yMax;
 
 
 #define NUM_THREADS 1
-#define SCORENORM  1.f
+//#define SCORENORM  1.f
 
 int maxepochs = 20;
 int maxepochsbias = 20;
 int maxfaults = 3;
 
-unsigned int nUsers = 0;
-unsigned int nItems = 0;
-unsigned int nRatings = 0;
-unsigned int nValidations =0;
-unsigned int nTests = 0;
-unsigned int nGenres = 0;
-unsigned int nAlbums = 0;
-unsigned int nArtists = 0;
-
 const unsigned int nFeatures = 100;
+char pfile[256];
 
 pthread_mutex_t mutexB = PTHREAD_MUTEX_INITIALIZER;
 int curItems[NUM_THREADS];
 pthread_mutex_t mutexFeature[nFeatures];
 
-#define STARTRATING(u) users[u].start
-#define ENDRATING(u) users[u].start + users[u].count
-#define MIN(a,b) (((a) < (b)) ? (a) : (b))
-#define MAX(a,b) (((a) > (b)) ? (a) : (b))
-#define CLAMP(p) MAX(MIN(p,100./SCORENORM), 0.)
-#define CLAMP2(p) MAX(MIN(p,100./SCORENORM), -100./SCORENORM)
-
-enum {
-	NONE = 0,
-	TRACK,
-	ALBUM,
-	ARTIST,
-	GENRE,
-};
-
-struct rating_s {
-	//unsigned int user : 20;
-	unsigned int item : 20;
-	//float rating;
-	//float extra;
-	unsigned int rating : 8;
-       	//signed int extra : 8;
-}; // __attribute__((__packed__));
-//};
-
-struct item_s {
-	uint32_t id;
-	uint32_t count;
-	unsigned int type : 3;
-	int artistid : 21;
-	int albumid : 21;
-};
-
-struct user_s {
-	uint32_t id;
-	uint32_t count;
-	uint32_t start;
-};
-
-
 double terrs[NUM_THREADS];
 
-typedef hash_multimap<int, int> multimapII;
-hash_map<int, int> genreMap;
-hash_map<int, int> artistMap;
-hash_map<int, int> albumMap;
-hash_multimap<int, int> genreItemMap;
-unsigned int umaplen = 0,imaplen = 0;
-hash_map<int, int> imap;
-hash_map<int, int> umap;
-double *bu, *bi, *p, *x, *y, *q, *bg, *bal, *bar;
+double *bu, *bi, *p, *x, *y, *q, *bg, *bal, *bar, *bit;
 double *pAl, *pAr, *qAl, *qAr, *pg, *qg;
-struct rating_s *ratings;
-struct item_s *items;
-struct user_s *users;
-struct rating_s *validations;
-struct rating_s *tests;
-double mu;
 
 pthread_barrier_t barrier;
 
@@ -171,13 +114,6 @@ inline double collect_values(double err, int rank) {
 	return err;
 }
 
-double get_time()
-{
-    struct timeval t;
-    struct timezone tzp;
-    gettimeofday(&t, &tzp);
-    return t.tv_sec + t.tv_usec*1e-6;
-}
 
 inline double randF(double min, double max)
 {
@@ -185,82 +121,26 @@ inline double randF(double min, double max)
    return a * (max - min) + min;
 }
 
-inline int parseInt(char *s, ssize_t *i, int *a, ssize_t size) {
-	*a = 0;
-	while(*i < size) {
-		char c = s[*i];
-		if (! isdigit(c)) {
-			(*i)++;
-			break;
-		}
-		*a = (*a) * 10 + (int)( c -'0');
-		(*i)++;
-	}
-	return *i == size;
-}
-
-void *open_read(const char *file, ssize_t *size)
-{
-	struct stat sbuf;
-	int f = open(file, O_RDONLY);
-	stat(file, &sbuf);
-	*size = sbuf.st_size; // 5967164350;
-	//printf("%s %ld\n", file, *size);
-	void *data = mmap(0, *size, PROT_READ, MAP_SHARED, f, 0);
-	if(data == MAP_FAILED) {
-		printf("%s %ld %d\n", file, *size, errno);
-		if ( errno == EACCES) printf("ACCESS\n");
-		if ( errno == EBADF) printf("BADF\n");
-		if ( errno == EINVAL) printf("INVAL\n");
-		return NULL;
-	}
-	close(f);
-	return data;
-}
-
-void *open_rw(const char *file, ssize_t size, int advice = MADV_SEQUENTIAL)
-{
-	struct stat sbuf;
-	int f = open(file, O_APPEND|O_RDWR|O_CREAT, 0664);
-	ftruncate(f, size);
-
-	void *data = mmap(0, size, PROT_READ|PROT_WRITE, MAP_SHARED, f, 0);
-	if(data == MAP_FAILED) {
-		printf("%s %ld %d\n", file, size, errno);
-		if ( errno == EACCES) printf("ACCESS\n");
-		if ( errno == EBADF) printf("BADF\n");
-		if ( errno == EINVAL) printf("INVAL\n");
-		return NULL;
-	}
-	madvise(data, size, advice);
-	return data;
-}
-
 
 void load_model()
 {
-	bal = (double*) open_rw("tmp/bal.mmap", sizeof(double)*nAlbums);
-	bar = (double*) open_rw("tmp/bar.mmap", sizeof(double)*nArtists);
-	bg = (double*) open_rw("tmp/bg.mmap", sizeof(double)*nGenres);
-	bi = (double*) open_rw("tmp/bi.mmap", sizeof(double)*nItems);
-	bu = (double*)open_rw("tmp/bu.mmap", sizeof(double)*nUsers);
-	ratings = (struct rating_s*)open_rw("tmp/ratings.mmap", sizeof(rating_s)*nRatings);
-	validations= (struct rating_s*)open_rw("tmp/validations.mmap", sizeof(rating_s)*nValidations);
-	tests = (struct rating_s*)open_rw("tmp/tests.mmap", sizeof(rating_s)*nTests);
-	items = (struct item_s*)open_rw("tmp/items.mmap", sizeof(item_s)*nItems, MADV_RANDOM);
-	users = (struct user_s*)open_rw("tmp/users.mmap", sizeof(user_s)*nUsers);
+	bal = (double*) open_rw("bal.mmap", sizeof(double)*nAlbums);
+	bar = (double*) open_rw("bar.mmap", sizeof(double)*nArtists);
+	bg = (double*) open_rw("bg.mmap", sizeof(double)*nGenres);
+	bi = (double*) open_rw("bi.mmap", sizeof(double)*nItems);
+	bit = (double*) open_rw("bit.mmap", sizeof(double)*nItems*NBINIT);
+	bu = (double*)open_rw("bu.mmap", sizeof(double)*nUsers);
+	p = (double *)open_rw("p.mmap", sizeof(double)*nFeatures*nUsers);
+	q = (double*)open_rw("q.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
+	x = (double*)open_rw("x.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
+	y = (double*)open_rw("y.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
 
-	p = (double *)open_rw("tmp/p.mmap", sizeof(double)*nFeatures*nUsers);
-	q = (double*)open_rw("tmp/q.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
-	x = (double*)open_rw("tmp/x.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
-	y = (double*)open_rw("tmp/y.mmap", sizeof(double)*nFeatures*nItems, MADV_RANDOM);
-
-	pg = (double *)open_rw("tmp/pG.mmap", sizeof(double)*nFeatures*nUsers);
-	qg = (double*)open_rw("tmp/qG.mmap", sizeof(double)*nFeatures*nGenres, MADV_RANDOM);
-	pAl = (double *)open_rw("tmp/pAl.mmap", sizeof(double)*nFeatures*nUsers);
-	qAl = (double*)open_rw("tmp/qAl.mmap", sizeof(double)*nFeatures*nAlbums, MADV_RANDOM);
-	pAr = (double *)open_rw("tmp/pAr.mmap", sizeof(double)*nFeatures*nUsers);
-	qAr = (double*)open_rw("tmp/qAr.mmap", sizeof(double)*nFeatures*nArtists, MADV_RANDOM);
+	pg = (double *)open_rw("pG.mmap", sizeof(double)*nFeatures*nUsers);
+	qg = (double*)open_rw("qG.mmap", sizeof(double)*nFeatures*nGenres, MADV_RANDOM);
+	pAl = (double *)open_rw("pAl.mmap", sizeof(double)*nFeatures*nUsers);
+	qAl = (double*)open_rw("qAl.mmap", sizeof(double)*nFeatures*nAlbums, MADV_RANDOM);
+	pAr = (double *)open_rw("pAr.mmap", sizeof(double)*nFeatures*nUsers);
+	qAr = (double*)open_rw("qAr.mmap", sizeof(double)*nFeatures*nArtists, MADV_RANDOM);
 }
 
 void *init_model(void *ptr = NULL) {
@@ -283,6 +163,9 @@ void *init_model(void *ptr = NULL) {
 	for(int i =rank; i < nAlbums; i += NUM_THREADS) {
 	       bal[i] = 0;
 	}
+	for(int i =rank; i < nUsers*NBINIT; i += NUM_THREADS) {
+	       bit[i] = 0;
+	}
 	double sq, err=1e6, pred, lasterr = 1e6+1, vBest= 1e6;
 	int epoch = 0, faults = 0;
 	while (epoch < maxepochsbias && faults < maxfaults) {
@@ -293,8 +176,9 @@ void *init_model(void *ptr = NULL) {
 				struct rating_s rating = ratings[r];
 				struct item_s item = items[rating.item];
 				double tmpbi = bi[rating.item];
+				double tmpbit = bit[rating.item*NBINIT+ITBIN(rating.day)];
 #ifdef BIASES
-				pred = mu + bu[u] + tmpbi;
+				pred = mu + bu[u] + tmpbi + tmpbit;
 #else
 				pred = 0;
 #endif
@@ -322,6 +206,7 @@ void *init_model(void *ptr = NULL) {
 #ifdef BIASES
 				bu[u] += userStep*(err - userReg*bu[u]);
 				bi[rating.item] += itemStep*(err - itemReg*tmpbi);
+			       	bit[rating.item*NBINIT+ITBIN(rating.day)] += itemStep*(err-itemReg*tmpbit);
 #endif // BIASES
 #ifdef BIASESG
 				for (multimapII::const_iterator i = p.first; i != p.second; ++i) {
@@ -354,7 +239,7 @@ void *init_model(void *ptr = NULL) {
 				struct rating_s rating = validations[r];
 				struct item_s item = items[ratings[r].item];
 #ifdef BIASES
-				pred = mu + bu[u] + bi[rating.item];
+				pred = mu + bu[u] + bi[rating.item] + bit[rating.item*NBINIT+ITBIN(rating.day)];
 #else
 				pred = 0;
 #endif //BIASES
@@ -474,7 +359,7 @@ void *init_model(void *ptr = NULL) {
 	return 0;
 }
 
-inline double predict(int uid, int iid, bool print = false)
+inline double predict(int uid, int iid, int day, bool print/* = false*/)
 {
 	struct item_s item = items[iid];
 	double sum = 0;
@@ -483,7 +368,7 @@ inline double predict(int uid, int iid, bool print = false)
 	if (print)
 		printf("\n\n");
 #ifdef BIASES
-	sum += mu + bu[uid] + bi[iid];
+	sum += mu + bu[uid] + bi[iid] + bit[iid*NBINIT+ITBIN(day)];
 	if(print)
 		printf("bu/i: %g %g %g\n", mu, bu[uid], bi[iid]);
 #endif //BIASES
@@ -562,129 +447,6 @@ inline double predict(int uid, int iid, bool print = false)
 	return CLAMP(sum);
 }
 
-double validate(bool print = false)
-{
-	double sq = 0;
-	for(int u = 0; u < nUsers; u++) {
-		for(int r = u*4; r < (u+1)*4; r++) {
-			double pred = predict(u, validations[r].item, print);
-			double err = (double)validations[r].rating - pred;
-			sq += err*err*SCORENORM*SCORENORM;
-			if (print) {
-				printf("%d %d %g %g %g\n", u, validations[r].item, validations[r].rating*SCORENORM, pred*SCORENORM, err*SCORENORM);
-			}
-		}
-	}
-	return sqrt(sq/nValidations);
-
-}
-
-void make_predictions()
-{
-	FILE *fp = fopen("predictions.txt", "w");
-	for(int u = 0; u < nUsers; u++) {
-		for(int r = 0; r < 6; r++) {
-			int iid = u*6 +r;
-			double pred = predict(u,tests[iid].item);
-			fprintf(fp, "%lf\n", pred); //*SCORENORM);
-		}
-	}
-	fclose(fp);
-}
-
-void read_tests()
-{
-	int uid, n, iid, stmp, day, hr, min, sec;
-	double  score;
-	ssize_t didx = 0;
-	unsigned int uidx=0, ridx=0, iidx=0;
-	ssize_t size;
-	char *data = (char *)open_read("testIdx1.txt", &size);
-	int sum = 0;
-	while(1) {
-		if ( parseInt(data, &didx, &uid, size) ) {
-			break;
-		}
-		uidx = umap[uid];
-		parseInt(data, &didx, &n, size);
-		if (n != 6) printf("Error size not 6!=%d\n", n);
-		//users[uidx].qu = n;
-		for(int i =0; i < n; i++) {
-			parseInt(data, &didx, &iid, size);
-			parseInt(data, &didx, &day, size);
-			parseInt(data, &didx, &hr, size);
-			parseInt(data, &didx, &min, size);
-			parseInt(data, &didx, &sec, size);
-			if( imap.count(iid) == 0) {
-				iidx = imaplen;
-				imaplen ++;
-				imap[iid] = iidx;
-
-				items[iidx].id = iid;
-				items[iidx].count = 0;
-				items[iidx].albumid = -1;
-				items[iidx].artistid = -1;
-			} else {
-				iidx = imap[iid];
-				assert(items[iidx].id == iid);
-			}
-			tests[ridx].item = iidx;
-			tests[ridx].rating = 0;
-			ridx++;
-		}
-	}
-	munmap(data, size);
-	nTests = ridx;
-	printf("nTests = %d %d\n", nTests, ridx);
-}
-
-
-void read_validate()
-{
-	int uid, n, iid, stmp, day, hr, min, sec;
-	double  score;
-	ssize_t didx = 0;
-	unsigned int uidx=0, ridx=0, iidx=0;
-	ssize_t size;
-	char *data = (char *)open_read("validationIdx1.txt", &size);
-	int sum = 0;
-	while(1) {
-		if ( parseInt(data, &didx, &uid, size) ) {
-			break;
-		}
-		uidx = umap[uid];
-		parseInt(data, &didx, &n, size);
-		//users[uidx].nu = n;
-		for(int i = 0; i < n; i++) {
-			parseInt(data, &didx, &iid, size);
-			parseInt(data, &didx, &stmp, size);
-			parseInt(data, &didx, &day, size);
-			parseInt(data, &didx, &hr, size);
-			parseInt(data, &didx, &min, size);
-			parseInt(data, &didx, &sec, size);
-			score = (double) stmp / SCORENORM;
-			if( imap.count(iid) == 0) {
-				iidx = imaplen;
-				imaplen ++;
-				imap[iid] = iidx;
-
-				items[iidx].id = iid;
-				items[iidx].count = 0;
-				items[iidx].artistid = -1;
-				items[iidx].albumid = -1;
-			} else {
-				iidx = imap[iid];
-				assert(items[iidx].id == iid);
-			}
-			validations[ridx].item = iidx;
-			validations[ridx].rating = score;
-			ridx++;
-		}
-	}
-	munmap(data, size);
-	nValidations = ridx;
-	printf("nValidations = %d\n", nValidations);
-}
 
 void *train_model(void *ptr = NULL) {
 	int rank = 0;
@@ -729,10 +491,11 @@ void *train_model(void *ptr = NULL) {
 			for(int r = STARTRATING(u); r < ENDRATING(u); r++ ) {
 				struct rating_s &rating = ratings[r];
 				struct item_s &item = items[rating.item];
-				double err = (double) rating.rating - predict(u, rating.item);
+				double err = (double) rating.rating - predict(u, rating.item, rating.day);
 				double tmpbi = bi[rating.item];
+				double tmpbit = bit[rating.item*NBINIT+ITBIN(rating.day)];
 				if (err > 100 || err < -100) {
-					printf("ERR OOB: %g %g %g\n", err, (double)rating.rating, predict(u, rating.item));
+					printf("ERR OOB: %g %g %g\n", err, (double)rating.rating, predict(u, rating.item, rating.day));
 				}
 				sq += err*err*SCORENORM*SCORENORM;
 #ifdef LATENT
@@ -747,6 +510,7 @@ void *train_model(void *ptr = NULL) {
 #ifdef BIASES
 				bu[u] += userStep2*(err - userReg*bu[u]);
 				bi[rating.item] += itemStep2*(err - itemReg*tmpbi);
+				bit[rating.item*NBINIT+ITBIN(rating.day)] += itemStep2*(err - itemReg*tmpbit);
 #endif //BIASES
 
 				pair<multimapII::const_iterator, multimapII::const_iterator> p =
@@ -891,228 +655,6 @@ void kickoff(void *(*foo)(void*))
 }
 #endif
 
-void read_data()
-{
-	int uid, n, iid, stmp, day, hr, min, sec;
-	double  score;
-	ssize_t didx = 0;
-	unsigned int uidx=0, ridx=0, iidx=0;
-	ssize_t size;
-	char *data = (char *)open_read("trainIdx1.txt", &size);
-	int sum = 0;
-	int start = 0;
-	mu = 0;
-	while(1) {
-		if ( parseInt(data, &didx, &uid, size) ) {
-			break;
-		}
-		//printf("' %c\n", data[didx-1]);
-		if (umap.count(uid) == 0) {
-			uidx = umaplen;
-			umaplen++;
-			umap[uid] = uidx;
-			users[uidx].id = uid;
-		} else {
-			uidx = imap[uid];
-		}
-		parseInt(data, &didx, &n, size);
-		users[uidx].count = n;
-		users[uidx].start = start;
-		start += n;
-		for(int i =0; i < n; i++) {
-			parseInt(data, &didx, &iid, size);
-			parseInt(data, &didx, &stmp, size);
-			parseInt(data, &didx, &day, size);
-			parseInt(data, &didx, &hr, size);
-			parseInt(data, &didx, &min, size);
-			parseInt(data, &didx, &sec, size);
-			score = (double) stmp / SCORENORM;
-			//score /= SCORENORM;
-			mu += score;
-			if( imap.count(iid) == 0) {
-				iidx = imaplen;
-				imaplen ++;
-				imap[iid] = iidx;
-
-				items[iidx].id = iid;
-				items[iidx].count = 0;
-				items[iidx].artistid = -1;
-				items[iidx].albumid = -1;
-			} else {
-				iidx = imap[iid];
-				assert(items[iidx].id == iid);
-			}
-			items[iidx].count += 1;
-			ratings[ridx].item = iidx;
-			ratings[ridx].rating = score;
-			assert(ratings[ridx].rating <= 100);
-			ridx++;
-		}
-	}
-	munmap(data, size);
-	read_validate();
-	read_tests();
-	nItems = imaplen;
-	nUsers = umaplen;
-	nRatings = ridx;
-	mu /= (double)ridx;
-	printf("nRatings = %d\n", nRatings);
-	printf("mu = %lg\n", mu);
-
-	FILE *tmp = fopen("tmp/values", "w");
-	fprintf(tmp, "%u %u %u %u %u %25.18lg\n", nRatings, nUsers, nItems, nValidations, nTests, mu);
-	for(int i = 0 ; i < nUsers; i++ ) {
-		fprintf(tmp, "%d\n", users[i].id);
-	}
-	for(int i = 0 ; i < nItems; i++ ) {
-		fprintf(tmp, "%d\n", items[i].id);
-	}
-	fclose(tmp);
-}
-
-void read_stats()
-{
-	FILE *fp = fopen("stats1.txt", "r");
-	char buf[512], *name, *value;
-	//char *buf = tmp;
-	unsigned long int d;
-	while(fgets(buf, 512, fp) != NULL) {
-		name = strtok(buf, "=");
-		value = strtok(NULL, "=");
-		d = strtoul(value, NULL, 10);
-		if(strncmp(name, "nUsers", 512) == 0) {
-			nUsers = d;
-		} else if(strncmp(name, "nItems", 512) == 0) {
-			nItems = d;
-		} else if(strncmp(name, "nRatings", 512) == 0) {
-			//pass
-		} else if(strncmp(name, "nTrainRatings", 512) == 0) {
-			nRatings = d;
-		} else if(strncmp(name, "nProbeRatings", 512) == 0) {
-			nValidations = d;
-		} else if(strncmp(name, "nTestRatings", 512) == 0) {
-			nTests = d;
-		} else if(strncmp(name, "nGenres", 512) == 0) {
-			nGenres = d;
-		} else if(strncmp(name, "nAlbums", 512) == 0) {
-			nAlbums = d;
-		} else if(strncmp(name, "nArtists", 512) == 0) {
-			nArtists = d;
-		} else {
-			fprintf(stderr, "ERROR unknown value in stats1.txt\n");
-			exit(1);
-		}
-		fprintf(stdout, "%s=%lu\n", name, d);
-	}
-
-	fclose(fp);
-}
-
-void read_albumData()
-{
-	FILE *fp = fopen("albumData1.txt","r");
-	int value;
-	char *cur;
-	char buf[200];
-	int trackid, albumid, artistid;
-	int aid = 0;
-	while(! feof(fp) ) {
-		fgets(buf, 200, fp);
-		if (feof(fp)) break;
-
-		albumid = atoi(strtok(buf, "|"));
-		albumMap[albumid] = aid;
-
-		if (imap.count(albumid) != 0) {
-			int iid = imap[albumid];
-			cur = strtok(NULL, "|");
-
-			items[iid].albumid = aid;
-			if (cur[0] != 'N') {
-				items[iid].artistid = artistMap[atoi(cur)];
-			}
-			while( (cur = strtok(NULL, "|")) != NULL) {
-				int value = atoi(cur);
-				int gid = genreMap[value];
-				genreItemMap.insert(hash_multimap<int,int>::value_type(iid, gid));
-			}
-		}
-		aid++;
-	}
-}
-
-void read_trackData()
-{
-	FILE *fp = fopen("trackData1.txt","r");
-	int value;
-	char *cur;
-	char buf[200];
-	int trackid, albumid, artistid;
-	while(! feof(fp) ) {
-		fgets(buf, 200, fp);
-		if (feof(fp)) break;
-
-		trackid = atoi(strtok(buf, "|"));
-
-		if(imap.count(trackid) == 0 )
-			continue;
-		int iid = imap[trackid];
-		items[iid].type = TRACK;
-		cur = strtok(NULL, "|");
-		if (cur[0] != 'N') {
-			albumid = atoi(cur);
-			items[iid].albumid = albumMap[albumid];
-		}
-		cur = strtok(NULL, "|");
-		if (cur[0] != 'N') {
-			artistid = atoi(cur);
-			items[iid].artistid = artistMap[artistid];
-		}
-		while( (cur = strtok(NULL, "|")) != NULL) {
-			int value = atoi(cur);
-			int gid = genreMap[value];
-			genreItemMap.insert(hash_multimap<int,int>::value_type(iid, gid));
-		}
-	}
-}
-
-void read_genres()
-{
-	FILE *fp = fopen("genreData1.txt","r");
-	int lines = 0, value;
-	int gid = 0;
-	while(! feof(fp) ) {
-		fscanf(fp, "%d\n", &value);
-		if(feof(fp)) break;
-		genreMap[value] = gid;
-		if(imap.count(value) > 0) {
-			int iid = imap[value];
-			items[iid].type = GENRE;
-			genreItemMap.insert(hash_multimap<int,int>::value_type(iid, gid));
-		}
-		gid++;
-	}
-}
-
-void read_artists()
-{
-	FILE *fp = fopen("artistData1.txt","r");
-	int lines = 0, value;
-	int aid = 0;
-	while(! feof(fp) ) {
-		fscanf(fp, "%d\n", &value);
-		if(feof(fp)) break;
-		artistMap[value] = aid;
-		if(imap.count(value) != 0) {
-			int iid = imap[value];
-			items[iid].type = ARTIST;
-			items[iid].artistid = aid;
-			items[iid].albumid = -1;
-		}
-		aid++;
-	}
-}
-
 void print_model_stats()
 {
 	FILE *fp = fopen("modelstats.txt", "w");
@@ -1181,18 +723,9 @@ void print_model_stats()
 	fprintf(fp, "# --------------\n");
 }
 
-void make_tmp_dir()
-{
-	struct stat st;
-	if(stat("tmp",&st) == 0)
-		return;
-	else
-		mkdir("tmp", 0777);
-}
-
 void read_params(void)
 {
-	FILE *fp = fopen("params.txt", "r");
+	FILE *fp = fopen(pfile, "r");
 	char buf[512], *name, *value;
 	//char *buf = tmp;
 	double d;
@@ -1280,9 +813,81 @@ void print_usage(char *progname)
 	printf("\n\n");
 }
 
+void save_model_results_local(FILE *file)
+{
+#define WRITEPD(name) fprintf(file, #name "=%lg\n", name);
+	WRITEPD(decay);
+	WRITEPD(decaypq);
+	WRITEPD(decay2);
+	WRITEPD(userStep);
+	WRITEPD(itemStep);
+	WRITEPD(genreStep);
+	WRITEPD(albumStep);
+	WRITEPD(artistStep);
+	WRITEPD(userReg);
+	WRITEPD(itemReg);
+	WRITEPD(genreReg);
+	WRITEPD(albumReg);
+	WRITEPD(artistReg);
+	WRITEPD(itemStep2);
+	WRITEPD(userStep2);
+	WRITEPD(genreStep2);
+	WRITEPD(albumStep2);
+	WRITEPD(artistStep2);
+	WRITEPD(pStep);
+	WRITEPD(qStep);
+	WRITEPD(pReg);
+	WRITEPD(qReg);
+	WRITEPD(pArStep);
+	WRITEPD(qArStep);
+	WRITEPD(pArReg);
+	WRITEPD(qArReg);
+	WRITEPD(pAlStep);
+	WRITEPD(qAlStep);
+	WRITEPD(pAlReg);
+	WRITEPD(qAlReg);
+	WRITEPD(pgStep);
+	WRITEPD(qgStep);
+	WRITEPD(pgReg);
+	WRITEPD(qgReg);
+
+	WRITEPD(xStep);
+	WRITEPD(xReg);
+	WRITEPD(yStep);
+	WRITEPD(yReg);
+
+	WRITEPD(pMax);
+	WRITEPD(qMax);
+	WRITEPD(xMax);
+	WRITEPD(yMax);
+
+	WRITEPD(pMin);
+	WRITEPD(qMin);
+	WRITEPD(xMin);
+	WRITEPD(yMin);
+
+#define WRITEPI(name) fprintf(file, #name "=%d\n", name);
+	fprintf(file, "seed=%ld\n", SEED);
+	WRITEPI(nFeatures);
+	WRITEPI(NUM_THREADS);
+	WRITEPD(SCORENORM);
+	WRITEPI(maxepochs);
+	WRITEPI(maxepochsbias);
+	WRITEPI(maxfaults);
+
+	WRITEPI(BIASES);
+	WRITEPI(BIASESG);
+	WRITEPI(BIASESA);
+	WRITEPI(LATENT);
+	WRITEPI(LATENTAL);
+	WRITEPI(LATENTAR);
+	WRITEPI(LATENTG);
+	WRITEPI(NBINIT);
+
+}
+
 int main (int argc, char **argv)
 {
-	//srandom(time(NULL));
 	int c;
 	bool isInit = false;
 	bool isTrain = false;
@@ -1291,8 +896,9 @@ int main (int argc, char **argv)
 	bool isStats = false;
 	bool isPredict = false;
 	bool printVerify = true;
+	char modelname[256]="";
 
-	while ( (c = getopt(argc, argv, "itvVme:spf:bE:hP")) != -1) {
+	while ( (c = getopt(argc, argv, "itvVme:spf:bE:hP:T:S:r")) != -1) {
 		switch (c) {
 			case 'i':
 				isInit = true;
@@ -1319,6 +925,12 @@ int main (int argc, char **argv)
 			case 'E':
 				maxepochsbias = atoi(optarg);
 				break;
+			case 'S':
+				strcpy(modelname, optarg);
+				break;
+			case 'T':
+				set_tmp_dir(optarg);
+				break;
 			case 'f':
 				maxfaults = atoi(optarg);
 				break;
@@ -1326,11 +938,15 @@ int main (int argc, char **argv)
 				isPredict = true;
 				break;
 			case 'P':
+				strcpy(pfile, optarg);
 				read_params();
 				break;
 			case 'h':
 				print_usage(argv[0]);
 				exit(0);
+				break;
+			case 'r':
+				randomize();
 				break;
 			case '?':
 				break;
@@ -1346,39 +962,12 @@ int main (int argc, char **argv)
 
 	pthread_barrier_init(&barrier, NULL, NUM_THREADS);
 
-	make_tmp_dir();
-
-	read_stats();
-
 	for(int i = 0; i < nFeatures; i++) {
 		pthread_mutex_init(&mutexFeature[i], NULL);
 	}
 
-	if(!isInit) {
-		FILE *tmp = fopen("tmp/values", "r");
-		fscanf(tmp, "%u %u %u %u %u %lg\n", &nRatings, &nUsers, &nItems, &nValidations, &nTests, &mu);
-		int lk = 0;
-		for(int i = 0 ; i < nUsers; i++ ) {
-			fscanf(tmp, "%d\n", &lk);
-			umap[lk] = i;
-		}
-		for(int i = 0 ; i < nItems; i++ ) {
-			fscanf(tmp, "%d\n", &lk);
-			imap[lk] = i;
-		}
-		fclose(tmp);
-	}
-
+	load_data(isInit);
 	load_model();
-
-	if(isInit) {
-		read_data();
-	}
-
-	read_genres();
-	read_artists();
-	read_albumData();
-	read_trackData();
 
 	if (isInit || isBuildModel) {
 		kickoff(init_model);
@@ -1400,6 +989,9 @@ int main (int argc, char **argv)
 
 	if(isPredict) {
 		make_predictions();
+	}
+	if(strlen(modelname) > 0) {
+		save_model_results(modelname);
 	}
 	pthread_barrier_destroy(&barrier);
 	pthread_exit(NULL);

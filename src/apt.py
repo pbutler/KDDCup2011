@@ -13,10 +13,10 @@ import os
 import subprocess
 import random
 import re
-from multiprocessing import Pool
+from multiprocessing import Pool, current_process
 
 source = "main.cpp"
-testdir = "../testdata10"
+testdir = "../testdata100"
 
 def singleton(cls):
     instances = {}
@@ -91,15 +91,23 @@ class GAPT(object):
     def evaluate(self):
         if self.valuation is not None:
             return self.valuation
-        #s = Source()
-        #s.compileWithParams(self.genes)
+        proc = current_process()
         curdir = os.getcwd()
         os.chdir(testdir)
-        file = open("params.txt", "w")
+        pfile = "params.txt"
+        if proc.name.startswith("PoolWorker"):
+            pfile += ".%d" % proc._identity[0]
+        file = open(pfile,  "w")
         for k in self.genes:
             file.write("%s=%g\n" %(k, self.genes[k]))
         file.close()
-        results = subprocess.Popen(["../src/main","-P", "-m", "-t"],stdout=subprocess.PIPE).communicate()[0]
+        cmd = ["../src/main","-P", pfile,  "-t", "-m"]
+        if proc.name.startswith("PoolWorker"):
+            tmpdir = "tmp%d/" % proc._identity[0]
+            if not os.path.exists(tmpdir):
+                cmd[-1] = "-i"
+            cmd += [ "-T", tmpdir]
+        results = subprocess.Popen(cmd, stdout=subprocess.PIPE).communicate()[0]
         #print results
         os.chdir(curdir)
         vrmsere = re.compile(r"Best is ([-e0-9.]+)")
@@ -183,21 +191,21 @@ def cull(population, maxpop):
     ranks = [ (p.evaluate(), p ) for p in population ]
     ranks.sort()
 
-def foo(p):
-    return p.evaluate(), p
+def foo(pet):
+    return pet.evaluate(), pet
 
 def runGA(pop = 50, noffspring = 20, mrate = .5, runs = 100):
     population = [ GAPT() for i in range(pop)]
 
-    #pool = Pool(4)
+    pool = Pool(10)
 
     best = None
     bestN = None
     try:
         for run in range(runs):
             #evaluate
-            ranks = map(foo, population) # for p in population ]
-            #ranks = pool.map(foo, population) # for p in population ]
+            #ranks = map(foo, population) # for p in population ]
+            ranks = pool.map(foo, population) # for p in population ]
             ranks.sort()
 
             population = [ p for e,p in ranks]
@@ -225,7 +233,8 @@ def runGA(pop = 50, noffspring = 20, mrate = .5, runs = 100):
             population += offspring
             print "--",
             #cull
-            ranks = [ foo(p) for p in population ]
+            #ranks = [ foo(p) for p in population ]
+            ranks = pool.map(foo, population)
             ranks.sort()
             ranks = ranks[:pop]
             population = [ p for e,p in ranks]
